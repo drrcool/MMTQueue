@@ -2,10 +2,9 @@
 
 Input : Local date
 """
-import ephem
+import ephem as pyEphem
 import math
 import datetime
-import matplotlib.pyplot as plt
 
 
 def targetObservability(time, airmass):
@@ -28,8 +27,8 @@ def targetObservability(time, airmass):
 
 def moonAge(time):
     """Return the age of the moon at the given time."""
-    d1 = ephem.next_new_moon(time).datetime()
-    d2 = ephem.previous_new_moon(time).datetime()
+    d1 = pyEphem.next_new_moon(time).datetime()
+    d2 = pyEphem.previous_new_moon(time).datetime()
 
     time = time.datetime()
     print(d1-time)
@@ -42,7 +41,7 @@ def moonAge(time):
 
 def moonPosition(datetime):
     """Return the position of the moon at given time."""
-    j = ephem.Moon()
+    j = pyEphem.Moon()
     j.compute(datetime)
 
     ra, dec = j.ra, j.dec
@@ -51,7 +50,7 @@ def moonPosition(datetime):
 
 def mmtObserver():
     """Return an mmt XEphem observer for given night."""
-    mmt = ephem.Observer()
+    mmt = pyEphem.Observer()
     mmt.pressure = 0
 
     # Set the USNO definition of sunset (to match the almanac)
@@ -83,10 +82,10 @@ def mmtTwilightDefinition():
 
 def mmtAltAz(mmt, ra, dec, dateTime):
     """Return the Alt/AZ for a given RA/DEC at specified time."""
-    star = ephem.FixedBody()
+    star = pyEphem.FixedBody()
     star._ra = ra
     star._dec = dec
-    star._epoch = ephem.J2000
+    star._epoch = pyEphem.J2000
     mmt.mmtObserver.date = dateTime
     star.compute(mmt.mmtObserver)
 
@@ -121,7 +120,7 @@ def airmassCurve(mmt, ra, dec):
     return timeArray, airmass
 
 
-class MMTEphem(object):
+class ephem(object):
     """Return object with important times at MMT telescope."""
 
     def __init__(self, dateObs):
@@ -134,17 +133,17 @@ class MMTEphem(object):
         mmt = mmtObserver()
         mmt.date = self.dateObs
         mmt.horizon = "-0:34"
-        self.sunset = mmt.next_setting(ephem.Sun())
-        self.sunrise = mmt.next_rising(ephem.Sun())
+        self.sunset = mmt.next_setting(pyEphem.Sun()).datetime()
+        self.sunrise = mmt.next_rising(pyEphem.Sun()).datetime()
 
         # Calculate morning and evening twilight
         mmt.horizon = mmtTwilightDefinition()
-        self.eveningTwilight = mmt.next_setting(ephem.Sun())
-        self.morningTwilight = mmt.next_rising(ephem.Sun())
+        self.eveningTwilight = mmt.next_setting(pyEphem.Sun()).datetime()
+        self.morningTwilight = mmt.next_rising(pyEphem.Sun()).datetime()
 
         # Calculate Moon rise and moon set
-        self.moonrise = mmt.next_rising(ephem.Moon())
-        self.moonset = mmt.next_setting(ephem.Moon())
+        self.moonrise = mmt.next_rising(pyEphem.Moon()).datetime()
+        self.moonset = mmt.next_setting(pyEphem.Moon()).datetime()
 
         # Save the observer in case other calculations need it.
         self.mmtObserver = mmt
@@ -156,7 +155,7 @@ class ObjEphem(object):
     def __init__(self, ra, dec, dateObs):
         """Initialize the object."""
         # Get the MMTEphemeris
-        mmtEphem = MMTEphem(dateObs)
+        mmtEphem = ephem(dateObs)
 
         # Calculate when this target rises and sets
         self.dateObs = mmtEphem.dateObs
@@ -180,7 +179,7 @@ class ObjEphem(object):
 if __name__ == "__main__":
     mmt = ObjEphem("8:00:00", "30:00:00", "2016/02/09")
 
-    date = ephem.Date("2016/02/10 19:40")
+    date = pyEphem.Date("2016/02/10 19:40")
     ra, dec = moonPosition(date)
     print(ra)
     print(dec)

@@ -8,8 +8,7 @@ and format output.
 """
 
 # Imports
-import sys
-import pandas as pd
+from pandas import DataFrame
 from os import walk
 
 
@@ -27,6 +26,9 @@ def readFLDfile(fileName):
     # Program ID
     junk, progID = f.readline().strip().split()
     obspars['progID'] = progID
+
+    # Add filename
+    obspars['fldfile'] = fileName
 
     # Parse the column keywords
     keywords = f.readline().strip().split()
@@ -56,12 +58,36 @@ def readAllFLDfiles(path=None):
         df = readFLDfile(file)
         dictList.append(df)
 
-    outFrame = pd.DataFrame(dictList)
+    outFrame = DataFrame(dictList)
 
     return outFrame
 
 
+def createBlankDoneMask(obsFrame):
+    """Create a blank structure to hold information about completed data.
+
+    Input:
+        obsFrame : DF of all observations being considered
+    Output:
+        doneFrame : DF with one line per observation with all "done"
+                    information set to not done.
+    """
+    nObs = len(obsFrame)
+
+    # Create the blank format
+    blankDict = {}
+    blankDict['complete'] = 0  # Is this observation completely done?
+    blankDict['doneVisit'] = 0  # How many visits have been completed?
+    blankDict['visitsScheduled'] = 0  # How many visits have been scheduled?
+    blankDict['weightBK'] = 1e6  # This is a bookkeeping weight.
+    blankDict['weightPartial'] = 0  # This says some visits were taken.
+
+    dictList = []
+    for ii in range(0, nObs):
+        dictList.append(blankDict)
+
+    outFrame = DataFrame(dictList)
+    return outFrame
+
 if __name__ == "__main__":
-    fileName = sys.argv[1]
-    df = readAllFLDfiles()
-    print(df['exptime'])
+    pass
