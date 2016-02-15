@@ -21,13 +21,24 @@ import os.path
 from pprint import pprint
 import queueTools
 import MMTEphem
+import math
 
-def mmirsOberhead(fld):
+
+def mmirsOverhead(fld):
     """Return the expected overhead time (in seconds) for MMIRS observation."""
 
-    if fld['obstype'] == 'mask':
+    obstype = fld['obstype'].values[0]
+
+    if obstype == 'mask':
         return 600.0
-    else if fld['obstype'] == ''
+    elif obstype == 'longslit':
+        return 300.0
+    elif obstype == 'imaging':
+        return 120.0
+    else:
+        # Make sure we return one of the modes, otherwise throw a fit
+        raise AssertionError("Unexpected value of OBSTYPE in " + fld["objid"])
+
 
 def willItFitWeight(fld, startTime, mmt):
     """Calculate a weight that measures the fraction of a field that fits.
@@ -46,24 +57,34 @@ def willItFitWeight(fld, startTime, mmt):
         weight : weight from 0 to 1 with fraction of field not able to be
                  observed
     """
-    print(len(fld))
+
+    # Throw an error if there are more than one
+    if len(fld) > 1:
+        raise AssertionError("There are more than 1 fields with name " +
+                             fld['objid'])
+
     # First, get the end of the night time
     nightEnd = mmt.morningTwilight
     timeRemaining = (nightEnd - startTime).total_seconds()  # In seconds
 
     # This loop may be specific for MMIRS as BINOSPEC
     # may not have the nvisit/nexposure definitions.
-    exptime = fld['exptime'].values * 60  # Exposure time is stored in minutes
-    repeats = fld['repeats'].values
-    nexp = fld['nexp'].values
+
+    # Exposure time is stored in minutes
+    exptime = float(fld['exptime'].values[0]) * 60.0
+    repeats = float(fld['repeats'].values[0])
+    nexp = float(fld['nexp'].values[0])
 
     # Calculate the number of visits that fit (keep it whole)
     # We don't want to worry about partial visits
     expPerVisit = exptime * nexp
-    possibleFinishedVisits = (timeRemaining - mmirsOverhead(fld)) / expPerVisit
+    possVisits = math.floor((timeRemaining - mmirsOverhead(fld)) / expPerVisit)
 
+    if possVisits > repeats:
+        return 0  # The number of possible visits is larger than requested
+    else:
+        return 1.0 * possVisits / repeats
 
-    return return possibleFinishedVisits
 
 def obsUpdateRow(fldPar, donePar, startTime, mmt):
     """Calculate observing weight for given observation.
