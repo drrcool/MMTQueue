@@ -24,3 +24,24 @@ This code is **not** production level at this point.  Work is ongoing.
 I'll try and keep this updated, but no promises.  
 
 Feb 9 -- Repo created.
+
+
+## Lunar age notes:
+
+Typical definitions:
+
+Dark : 0.0 < FLI < 0.25
+Grey : 0.25 < FLI < 0.65
+Bright : 0.65 < FLI < 1.00
+
+Typically FLI moves about 0.1 / day
+
+Trying to split fairly evenly, I make each window about 9 days
+
+Dark :  abs(age) < 4.5
+Grey : 4.5 < abs(age) < 9.0
+Bright : 9.0 < abs(age) < 14.0
+
+Note that we consider a night dark even if the night is "grey" but the observation can be fit in before moonrise. 
+
+Need to write a routine that checks if the moon is up at start and at end.  It's not really possible that the moon is down for both but was up in the middle.  

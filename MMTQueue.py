@@ -18,10 +18,34 @@ More to come as code is fleshed out.
 # Imports
 import sys
 import os.path
-from pprint import pprint
+import numpy as np
 import queueTools
 import MMTEphem
 import math
+import datetime
+import ephem as pyEphem
+
+
+def angSep(ra1, dec1, ra2, dec2):
+    """Calculate the angular separation between two points on the sky.
+
+    ALL INPUTS ARE Ephem Angles (so decimal ***RADIANS***).
+
+    OUTPUT IS IN DECIMAL DEGREES
+    """
+    y = math.cos(dec1) * math.cos(dec2)
+    z = math.sin(dec1) * math.sin(dec2)
+    x = math.cos(ra1-ra2)
+
+    rad = np.arccos(z+y*x)
+
+    if (rad < 0.000004848):
+        sep = math.sqrt((math.cos(dec1)*(ra1-ra2))**2 +
+                        (dec1-dec2)**2)
+    else:
+        sep = rad
+
+    return sep * 180 / math.pi
 
 
 def mmirsOverhead(fld):
@@ -38,6 +62,97 @@ def mmirsOverhead(fld):
     else:
         # Make sure we return one of the modes, otherwise throw a fit
         raise AssertionError("Unexpected value of OBSTYPE in " + fld["objid"])
+
+def lunarDistance(fld, startTime, endTime):
+    """Calculate the distance to the moon at starttime and end time."""
+    # Position of the target cast into pyeEphem Angle
+    tarRa = pyEphem.hours(fld['ra'].values[0])
+    tarDec = pyEphem.degrees(fld['dec'].values[0])
+
+    # Moon Position
+    moonRa1, moonDec1 = MMTEphem.moonPosition(startTime)
+    moonRa2, moonDec2 = MMTEphem.moonPosition(endTime)
+
+    dist1 = angSep(moonRa1, moonDec1, tarRa, tarDec)
+    dist2 = angSep(moonRa2, moonDec2, tarRa, tarDec)
+
+    return (dist1+dist2)/2.0
+
+
+
+def moonUpDuringObs(startTime, endTime, mmt):
+    """Return a 0/1 if moon is down/up at any point during observation."""
+    # Is the moon up during the window?
+    obs = mmt.mmtObserver
+
+    # Do a check at startTime
+    obs.date = startTime
+    obs.horizon = "-0:34"
+    prevMoonSet = obs.previous_setting(pyEphem.Moon()).datetime()
+    prevMoonRise = obs.previous_rising(pyEphem.Moon()).datetime()
+
+    # By definition, startTime is between prev and next, so
+    # we need to check and see if the previous rise or set was most
+    # recent
+    if (prevMoonSet > prevMoonRise):
+        # This is darktime since the most recent event was the
+        # moon setting.
+        moonAtStart = False
+    else:
+        moonAtStart = True
+
+    # Do a check at endTime
+    obs.date = endTime
+    prevMoonSet = obs.previous_setting(pyEphem.Moon()).datetime()
+    prevMoonRise = obs.previous_rising(pyEphem.Moon()).datetime()
+
+    # Check again at end time.  Is the most recent event still
+    # the moon setting? If yes, the moon is still down.
+    if (prevMoonSet > prevMoonRise):
+        # This is darktime
+        moonAtEnd = False
+    else:
+        moonAtEnd = True
+
+    isMoonUp = (moonAtStart | moonAtEnd)  # Logical OR, only care if both are 0
+    return int(isMoonUp)
+
+
+def calcMoonFlag(fld, startTime, endTime, mmt):
+    """Calculate the IGNORE_FLAG based on lunar brightness and position.
+
+    Inputs:
+        fld -- field parameter entry from obsPars
+        startTime -- datetime formatted starting time
+        endTime -- datetime formatted ending time
+
+    Output:
+        flag -- 0/1 flag marking if the field is too close to the moon or
+                the moon is brighter than specified.
+    """
+    moonUp = moonUpDuringObs(startTime, endTime, mmt)
+    moonAge = MMTEphem.moonAge(startTime)
+
+    # Get the distance to the moon
+    moonDist = lunarDistance(fld, startTime, endTime)
+
+    # Now do brightness flag
+    moonReq = fld['moon'].values[0]
+    if (moonReq == 'bright') | (moonUp == 0):
+        # Anything works, either we were asked for bright
+        # time or the moon isn't up during
+        # the entirety of the observation
+        illumFlag = 0
+    elif (moonReq == 'grey') & (abs(moonAge) < 9) & (moonDist < 90):
+        # We were asked for grey time and it's grey time
+        illumFlag = 0
+    elif (moonReq == 'dark') & (abs(moonAge) < 4.5) & (moonDist > 90.0):
+        # We were asked for dark time and it's dark time
+        illumFlag = 0
+    else:
+        illumFlag = 1e6   # This isn't going to work here!
+
+    return illumFlag
 
 
 def willItFitWeight(fld, startTime, mmt):
@@ -81,9 +196,18 @@ def willItFitWeight(fld, startTime, mmt):
     possVisits = math.floor((timeRemaining - mmirsOverhead(fld)) / expPerVisit)
 
     if possVisits > repeats:
-        return 0  # The number of possible visits is larger than requested
+
+        totalTargetTime = expPerVisit*repeats + mmirsOverhead(fld)
+        tdelta = datetime.timedelta(seconds=totalTargetTime)
+
+        # The number of possible visits is larger than requested so
+        # just return the starting time incremented by total length
+        return 0, startTime + tdelta
     else:
-        return 1.0 * possVisits / repeats
+
+        totalTargetTime = expPerVisit*possVisits + mmirsOverhead(fld)
+        tdelta = datetime.timedelta(seconds=totalTargetTime)
+        return 1.0 * possVisits / repeats, startTime+tdelta
 
 
 def obsUpdateRow(fldPar, donePar, startTime, mmt):
@@ -104,8 +228,12 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
     # the weight for this startTime.
     for objID in fldPar["objid"]:
         fld = fldPar[fldPar["objid"] == objID]
-        fitWeight = willItFitWeight(fld, startTime, mmt)
-        print(objID, fitWeight)
+        fitWeight, endTime = willItFitWeight(fld, startTime, mmt)
+        moonFlag = calcMoonFlag(fld, startTime, endTime, mmt)
+        #
+        print(objID, startTime, endTime, moonFlag, mmt.moonset)
+
+
 
 
 def main(args):
@@ -122,7 +250,7 @@ def main(args):
         donePar = queueTools.createBlankDoneMask(obsPars)
 
     # Run one call of obsUpdateRow as a test
-    date = "2016/02/15"
+    date = "2016/02/16"
     mmt = MMTEphem.ephem(date)
     startTime = mmt.eveningTwilight
 

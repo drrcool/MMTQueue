@@ -30,13 +30,15 @@ def moonAge(time):
     d1 = pyEphem.next_new_moon(time).datetime()
     d2 = pyEphem.previous_new_moon(time).datetime()
 
-    time = time.datetime()
-    print(d1-time)
-    print(d2-time)
+    # Check to see if the time was already a datetime. If not,
+    # make it one
+    if isinstance(time, datetime.datetime) is False:
+        time = time.datetime()
+
     if (d1-time) < (time-d2):
-        return abs(d1-time)
+        return abs( (d1-time).total_seconds()/3600./24.)
     else:
-        return(time-d2)
+        return( (time-d2).total_seconds()/3600./24.)
 
 
 def moonPosition(datetime):
@@ -142,6 +144,7 @@ class ephem(object):
         self.morningTwilight = mmt.next_rising(pyEphem.Sun()).datetime()
 
         # Calculate Moon rise and moon set
+        mmt.horizon = "-0:34"
         self.moonrise = mmt.next_rising(pyEphem.Moon()).datetime()
         self.moonset = mmt.next_setting(pyEphem.Moon()).datetime()
 
