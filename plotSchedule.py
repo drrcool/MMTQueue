@@ -1,6 +1,7 @@
 """ Testbed for schedule plotting code."""
 
 import matplotlib.pyplot as plt
+
 import datetime
 import os
 import sys
@@ -32,15 +33,16 @@ def main(argv):
         startTime.append(strings2datetime(startD, startT))
         endTime.append(strings2datetime(endD, endT))
         field.append(iiField)
-        index.append(ii)
+        index.append(ii+0.5)
         ii += 1
 
     udates = sorted(set(date))
 
-    plt.plot(startTime, index, '>')
-    plt.plot(endTime, index, '<')
+    plt.rcParams['font.size'] = 12
+    plt.plot(startTime, index, '>', color='darkblue')
+    plt.plot(endTime, index, '<', color='darkblue')
 
-    plt.ylim(max(index)+0.5, -1.0)
+    plt.ylim(max(index)+0.5, 0)
     plt.xlim(min(startTime)-datetime.timedelta(hours=12),
              max(endTime)+datetime.timedelta(hours=12))
     plt.gcf().autofmt_xdate()
@@ -51,16 +53,20 @@ def main(argv):
     while idate < maxdate+datetime.timedelta(days=2):
         mmt = MMTEphem.ephem(idate)
         plt.fill_between([mmt.eveningTwilight, mmt.morningTwilight],
-                        [0, 100])
+                        [-1, 100], alpha=0.25, color='darkblue')
+
         idate += datetime.timedelta(days=1)
 
     for ii in range(len(startTime)):
         diff = (endTime[ii]-startTime[ii]).total_seconds()/2.0
         xlabel = startTime[ii]-datetime.timedelta(seconds=diff*2)
-        ylabel = index[ii]-0.2
+        ylabel = index[ii]-0.1
         plt.annotate(field[ii], xy=(xlabel, ylabel))
 
-
+    plt.title("MMIRS Schedule March 2016")
+    plt.xlabel("UT Date")
+    plt.ylabel("Obs Index")
+    plt.show()
     plt.savefig('schedule.png')
 
 if __name__ == "__main__":
