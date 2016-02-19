@@ -1,0 +1,17 @@
+# This file contains a listing of the PI and the number of nights
+# They were scheduled.  Maybe even just a listing of the night?
+# Columns:
+# 1. Date in YYYY/MM/DD
+# 2. PI
+2016/03/17      TestPI
+2016/03/18      Ichilingarian
+2016/03/19      Ichilingarian
+2016/03/20      Ichilingarian
+2016/03/21      Ichilingarian
+2016/03/22      Milisavljevic
+2016/03/23      Milisavljevic
+2016/03/24      NSmith
+2016/03/25      DStark
+2016/03/26      DStark
+2016/03/27      DStark
+2016/03/28      DStark

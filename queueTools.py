@@ -10,6 +10,43 @@ and format output.
 # Imports
 from pandas import DataFrame
 from os import walk
+import MMTEphem
+import ephem as pyEphem
+
+def readAllocatedTime(startDay="1900/1/1", endDay="3000/1/1"):
+    """Read a log file to determine how much each PI was allocated."""
+    filename = "AllocatedTime.dat"
+    f = open(filename, 'r')
+
+    if type(startDay) == str:
+        startDay = pyEphem.date(startDay).datetime()
+    if type(endDay) == str:
+        endDay = pyEphem.date(endDay).datetime()
+
+
+    allocatedTime = {}
+    for line in f.readlines():
+        if line[0] == '#':
+            # Comment string, skip
+            continue
+
+        date, PI = line.strip().split()
+        date = pyEphem.date(date).datetime()
+        mmt = MMTEphem.ephem(date)
+        if (abs((date-startDay).total_seconds()) < 24*3600.) | \
+           (abs((date-endDay).total_seconds()) < 24*3600.):
+            # This night is not in the current run
+            continue
+
+        nightLength = (mmt.morningTwilight - mmt.eveningTwilight)
+        nightLength = nightLength.total_seconds() / 3600.0
+
+        if PI in allocatedTime:
+            allocatedTime[PI] += nightLength
+        else:
+            allocatedTime[PI] = nightLength
+
+    return allocatedTime
 
 
 def readFLDfile(fileName):
@@ -63,7 +100,7 @@ def readAllFLDfiles(path=None):
     return outFrame
 
 
-def createBlankDoneMask(obsFrame):
+def createBlankDoneMask(obsFrame, startDay="1900/1/1", endDay="3000/1/1"):
     """Create a blank structure to hold information about completed data.
 
     Input:
@@ -73,21 +110,31 @@ def createBlankDoneMask(obsFrame):
                     information set to not done.
     """
     nObs = len(obsFrame)
+    allocatedTime = readAllocatedTime(startDay=startDay, endDay=endDay)
 
     # Create the blank format
     blankDict = {}
     blankDict['complete'] = 0  # Is this observation completely done?
     blankDict['doneVisit'] = 0  # How many visits have been completed?
-    blankDict['visitsScheduled'] = 0  # How many visits have been scheduled?
-    blankDict['weightBK'] = 1e6  # This is a bookkeeping weight.
-    blankDict['weightPartial'] = 0  # This says some visits were taken.
+    blankDict['totalTime'] = 0.0
+    blankDict['doneTime'] = 0.0  # Total (for PI) completed time
+    blankDict['prevWeight'] = 1.0  # For tracking weights from previous pass
+    blankDict['currentWeight'] = 0.0
+    blankDict['PI'] = ''
+    blankDict['objid'] = ''
 
     dictList = []
     for ii in range(0, nObs):
-        dictList.append(blankDict)
+        copyDict = blankDict.copy()
+        PI = obsFrame['PI'].values[ii]
+        copyDict['objid'] = obsFrame['objid'].values[ii]
+        copyDict['PI'] = obsFrame["PI"].values[ii]
+        copyDict['totalTime'] = allocatedTime[PI]
+        dictList.append(copyDict)
 
     outFrame = DataFrame(dictList)
     return outFrame
+
 
 if __name__ == "__main__":
     pass

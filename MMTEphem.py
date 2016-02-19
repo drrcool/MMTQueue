@@ -105,8 +105,8 @@ def alt2airmass(alt):
 
 def airmassCurve(mmt, ra, dec):
     """Return the run of airmass as a function of time."""
-    startTime = mmt.sunset.datetime()
-    endTime = mmt.sunrise.datetime()
+    startTime = mmt.sunset
+    endTime = mmt.sunrise
 
     timedelta = datetime.timedelta(minutes=5)
 
@@ -129,8 +129,10 @@ class ephem(object):
         """Initialize object."""
         # Append 19:00 to make sure the date references
         # noon MST.
-        self.dateObs = dateObs + " 19:00"
+        if type(dateObs) == str:
+            dateObs = dateObs.split()[0] + " 19:00"
 
+        self.dateObs = dateObs
         # Calculate sunrise and sunset
         mmt = mmtObserver()
         mmt.date = self.dateObs
@@ -155,10 +157,9 @@ class ephem(object):
 class ObjEphem(object):
     """Return an objects with observability parameters for a given target."""
 
-    def __init__(self, ra, dec, dateObs):
+    def __init__(self, ra, dec, dateObs, mmtEphem):
         """Initialize the object."""
         # Get the MMTEphemeris
-        mmtEphem = ephem(dateObs)
 
         # Calculate when this target rises and sets
         self.dateObs = mmtEphem.dateObs

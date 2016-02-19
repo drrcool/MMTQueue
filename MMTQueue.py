@@ -19,11 +19,22 @@ More to come as code is fleshed out.
 import sys
 import os.path
 import numpy as np
+import pandas as pd
 import queueTools
 import MMTEphem
 import math
 import datetime
 import ephem as pyEphem
+from random import randint
+from pprint import pprint
+
+
+def isObservable(objEphem, endTime):
+    """Return a binary bit if target is observable at given time."""
+    tarray = [abs(x-endTime).total_seconds() for x in objEphem.time]
+    val, idx = min((val, idx) for (idx, val) in enumerate(tarray))
+
+    return objEphem.observable[idx]
 
 
 def angSep(ra1, dec1, ra2, dec2):
@@ -54,7 +65,7 @@ def mmirsOverhead(fld):
     obstype = fld['obstype'].values[0]
 
     if obstype == 'mask':
-        return 600.0
+        return 1800.0
     elif obstype == 'longslit':
         return 300.0
     elif obstype == 'imaging':
@@ -62,6 +73,7 @@ def mmirsOverhead(fld):
     else:
         # Make sure we return one of the modes, otherwise throw a fit
         raise AssertionError("Unexpected value of OBSTYPE in " + fld["objid"])
+
 
 def lunarDistance(fld, startTime, endTime):
     """Calculate the distance to the moon at starttime and end time."""
@@ -77,7 +89,6 @@ def lunarDistance(fld, startTime, endTime):
     dist2 = angSep(moonRa2, moonDec2, tarRa, tarDec)
 
     return (dist1+dist2)/2.0
-
 
 
 def moonUpDuringObs(startTime, endTime, mmt):
@@ -142,20 +153,20 @@ def calcMoonFlag(fld, startTime, endTime, mmt):
         # Anything works, either we were asked for bright
         # time or the moon isn't up during
         # the entirety of the observation
-        illumFlag = 0
+        illumFlag = 1
     elif (moonReq == 'grey') & (abs(moonAge) < 9) & (moonDist < 90):
         # We were asked for grey time and it's grey time
-        illumFlag = 0
+        illumFlag = 1
     elif (moonReq == 'dark') & (abs(moonAge) < 4.5) & (moonDist > 90.0):
         # We were asked for dark time and it's dark time
-        illumFlag = 0
+        illumFlag = 1
     else:
-        illumFlag = 1e6   # This isn't going to work here!
+        illumFlag = 0   # This isn't going to work here!
 
     return illumFlag
 
 
-def willItFitWeight(fld, startTime, mmt):
+def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
     """Calculate a weight that measures the fraction of a field that fits.
 
     Here, smaller weights are better, so we look at the fraction of the
@@ -171,6 +182,10 @@ def willItFitWeight(fld, startTime, mmt):
     Outputs:
         weight : weight from 0 to 1 with fraction of field not able to be
                  observed
+        endTime : time this observation would finish. If not observable
+                  will return the starttime. If only partially observable
+                  will return the time at end of full visit.
+        nVisits : the number of visits observed.
     """
 
     # Throw an error if there are more than one
@@ -182,12 +197,17 @@ def willItFitWeight(fld, startTime, mmt):
     nightEnd = mmt.morningTwilight
     timeRemaining = (nightEnd - startTime).total_seconds()  # In seconds
 
+    # Is the target observable at the StartTime?
+    if isObservable(objEphem, startTime) == 0:
+        return 0.0, startTime, 0
+
     # This loop may be specific for MMIRS as BINOSPEC
-    # may not have the nvisit/nexposure definitions.
+    # may not have the nvisit/nexposure definitionss
 
     # Exposure time is stored in minutes
     exptime = float(fld['exptime'].values[0]) * 60.0
-    repeats = float(fld['repeats'].values[0])
+    repeats = float(fld['repeats'].values[0]) - \
+        float(donePar['doneVisit'].values[0])
     nexp = float(fld['nexp'].values[0])
 
     # Calculate the number of visits that fit (keep it whole)
@@ -200,14 +220,31 @@ def willItFitWeight(fld, startTime, mmt):
         totalTargetTime = expPerVisit*repeats + mmirsOverhead(fld)
         tdelta = datetime.timedelta(seconds=totalTargetTime)
 
-        # The number of possible visits is larger than requested so
-        # just return the starting time incremented by total length
-        return 0, startTime + tdelta
-    else:
+        # Now, let's see if the target is still observable at the end of
+        # the block
+        endTime = startTime + tdelta
+        if isObservable(objEphem, endTime) == 1:
+            return 1.0, endTime, repeats
+        else:
+            possVisits = repeats
 
-        totalTargetTime = expPerVisit*possVisits + mmirsOverhead(fld)
+    # Ok, we couldn't fit all the observations in. Let's figure out
+    # how much we can
+    nVisitsObservable = possVisits
+
+    while nVisitsObservable > 0:
+        totalTargetTime = expPerVisit*nVisitsObservable + mmirsOverhead(fld)
         tdelta = datetime.timedelta(seconds=totalTargetTime)
-        return 1.0 * possVisits / repeats, startTime+tdelta
+        endTime = startTime + tdelta
+
+        # Check to see if it's observable at the end of the window
+        if isObservable(objEphem, endTime) == 1:
+            return 1.0 * nVisitsObservable/repeats, endTime, nVisitsObservable
+        else:
+            nVisitsObservable = -1
+
+    # If we get here, the object is never observable, return bad weight
+    return 0, startTime, 0
 
 
 def obsUpdateRow(fldPar, donePar, startTime, mmt):
@@ -219,21 +256,143 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         donepar : Dataframe with stats pertaining to a fields doneness
         starTime : datetime string for beginning time for observation
 
-    Output:
-        weight : float (0 to 1e6) representing how well this fits into the
-                 observation (lower = better). Observations that get
-                 IGNORE_FLAG are set to 1e6.
     """
     # The idea here is to loop through all of the fields and calculate
     # the weight for this startTime.
+    weightList = []  # Will store array of dicts with weight info
+
     for objID in fldPar["objid"]:
+        # Is this already observed?
+        donefld = donePar[donePar['objid'] == objID]
         fld = fldPar[fldPar["objid"] == objID]
-        fitWeight, endTime = willItFitWeight(fld, startTime, mmt)
+
+        if donefld['complete'].values[0] == 1:
+            continue
+
+        # Initialize the weight dictionary
+        obsWeight = {}
+        obsWeight['objid'] = objID
+
+        objEphem = MMTEphem.ObjEphem(fld['ra'].values[0],
+                                     fld['dec'].values[0],
+                                     startTime, mmt)
+        fitWeight, endTime, fitVisits = willItFitWeight(fld,
+                                                        startTime, mmt,
+                                                        objEphem,
+                                                        donefld)
         moonFlag = calcMoonFlag(fld, startTime, endTime, mmt)
-        #
-        print(objID, startTime, endTime, moonFlag, mmt.moonset)
+
+        obsWeight['fitWeight'] = fitWeight
+        obsWeight['obsTime'] = (endTime-startTime).total_seconds()
+        obsWeight['moonFlag'] = moonFlag
+        obsWeight['nVisits'] = fitVisits
+
+        # Now combine the weights
+        weightTAC = 1.0 - 1.0 * donefld['doneTime'].values[0] \
+            / donefld['totalTime'].values[0]
+        if weightTAC < 0:
+            weightTAC = 0.001
+        totalWeight = fitWeight * moonFlag * (weightTAC)
+
+        # We need to account for a few extra things.
+        # 1. I want fields that have had previously observed
+        #    fields to be the top priority if they are observable.
+        # This modification will weight fields with no observations
+        # at one (1+0) and those partially observed at 10
+        partCompWeight = int(donefld['doneVisit'].values[0] > 0)
+        totalWeight = totalWeight * (1+9.0*partCompWeight)
+
+        # Now account for weighting from preivous iteration of the
+        # code. This should smooth things out
+        totalWeight = totalWeight * donefld['prevWeight'].values[0]
+
+        obsWeight['totalWeight'] = totalWeight
+        # Append to weight listing
+        weightList.append(obsWeight)
+
+    obsWeights = pd.DataFrame(weightList)
+
+    # Doing the O(n) problem here
+    hasMax = []
+
+    # Check to see there are actually targets!
+    if len(obsWeights) == 0:
+        return None
+
+    maxWeight = max(obsWeights['totalWeight'])
+    for ii in range(len(obsWeights)):
+        if obsWeights['totalWeight'].values[ii] == maxWeight:
+            hasMax.append(ii)
+
+    # Now, check there are some with non-zero weight and
+    # Observe a random one
+    if maxWeight == 0:
+        # No targets were done.
+        return None
+    else:
+        randIndex = hasMax[randint(0, len(hasMax)-1)]
+
+        diffTime = obsWeights['obsTime'].values[randIndex]
+        # Increment the schedule
+        schedule = []
+        schedule.append(startTime)
+        schedule.append(diffTime)
+        schedule.append(obsWeights['objid'].values[randIndex])
+
+        # Update the done masks
+        index = [i for i, x in enumerate(donePar['objid'] ==
+                                         schedule[2]) if x]
+
+        # Donetime tracks total time for this PI.  We weight by
+        # this, so let's increment all entries in donefld
+
+        PI = donePar.loc[index, 'PI'].values[0]
+        for ii in range(len(fldPar)):
+            if donePar["PI"].values[ii] == PI:
+                donePar.loc[ii, 'doneTime'] += diffTime/3600.
+                donePar.loc[ii, 'currentWeight'] = \
+                    donePar.loc[ii, 'doneTime'] / \
+                    donePar.loc[ii, 'totalTime']
+
+        donePar.loc[index, 'doneVisit'] += \
+            obsWeights['nVisits'].values[randIndex]
+
+        # Check to see if the target is now done
+        requested = int(fldPar[fldPar['objid'] ==
+                               schedule[2]]["repeats"].values[0])
+        if int(donePar.loc[index, 'doneVisit']) >= requested:
+            donePar.loc[index, 'complete'] = 1
+        return schedule
 
 
+def obsOneNight(fldPar, donePar, date):
+    """Fully Schedules one night."""
+    # Get the ephemeris for the night
+    mmt = MMTEphem.ephem(date)
+    startTime = mmt.eveningTwilight
+
+    # Now, start at twilight and add observervations. Each
+    # time increment currentTime by the observation time
+    # If no observations are found, add 5 minutes and check again
+    currentTime = startTime
+    schedule = []  # Will contain scheduled fields
+    allDone = False
+    while (currentTime < mmt.morningTwilight) & (allDone is False):
+        newSched = obsUpdateRow(fldPar, donePar, currentTime, mmt)
+        # Check to see if something was observed
+        if newSched is None:
+            # Increment time and continue
+            currentTime += datetime.timedelta(minutes=20)
+        else:
+            # Append new entry to schedule, increment currentTime
+            # by exposure time.
+            schedule.append(newSched)
+            currentTime += datetime.timedelta(seconds=newSched[1])
+            completed = donePar['complete'].values
+            if min(completed) == 1:
+                allDone = True
+
+    return schedule
 
 
 def main(args):
@@ -250,12 +409,66 @@ def main(args):
         donePar = queueTools.createBlankDoneMask(obsPars)
 
     # Run one call of obsUpdateRow as a test
-    date = "2016/02/16"
-    mmt = MMTEphem.ephem(date)
-    startTime = mmt.eveningTwilight
+    allDates = ["2016/03/18",
+                "2016/03/19",
+                "2016/03/20",
+                "2016/03/21",
+                "2016/03/24",
+                "2016/03/25",
+                "2016/03/26",
+                "2016/03/27",
+                "2016/03/28"]
+    for iter in range(4):
+        print("")
+        print("**** ITERATION # %i ********" % (iter+1))
+        fullSched = []
+        for date in allDates:
+            sys.stdout.write("\r Working on Date %s   " % date)
+            schedule = obsOneNight(obsPars, donePar, date)
+            for line in schedule:
+                fullSched.append(line)
 
-    obsUpdateRow(obsPars, donePar, startTime, mmt)
+        # Now, fill in previous weights and zero out entries in a
+        # new donePar
+        newDone = donePar.copy()
+        newDone.loc[:, 'complete'] = 0
+        newDone.loc[:, 'doneTime'] = 0.0
+        newDone.loc[:, 'doneVisit'] = 0.0
 
+        # Make a list of PIS and see if they got all the fields they
+        # asked for.
+        allDone = {}
+        for ii in range(len(newDone)):
+            PI = newDone["PI"].values[ii]
+            if PI not in allDone:
+                completed = donePar[donePar['PI'] == PI]['complete'].values
+                if min(completed) == 1:
+                    allDone[PI] = True
+                else:
+                    allDone[PI] = False
+            weightMod = int(allDone[PI])
+            newDone.loc[ii, 'prevWeight'] = \
+                donePar.loc[ii, 'currentWeight']*(1-weightMod*0.9)
+
+        newDone.loc[:, 'currentWeight'] = 0.0
+        pprint(donePar)
+        if iter != 3:
+            donePar = newDone
+
+    # Format the schedule for output
+    f = open('schedule.dat', 'w')
+    for sched in fullSched:
+        startTime = sched[0]
+        duration = sched[1]
+        field = sched[2]
+
+        FORMAT = "%Y/%m/%d %H:%M:%S"
+        outStart = startTime.strftime(FORMAT)
+        endTime = startTime + datetime.timedelta(seconds=duration)
+        outEnd = endTime.strftime(FORMAT)
+        f.write("%s %s %s\n" % (outStart, outEnd, field))
+
+    f.close()
 
 if __name__ == "__main__":
     main(sys.argv)
