@@ -65,7 +65,7 @@ def mmirsOverhead(fld):
     obstype = fld['obstype'].values[0]
 
     if obstype == 'mask':
-        return 2700.0
+        return 3600.0
     elif obstype == 'longslit':
         return 1800.0
     elif obstype == 'imaging':
@@ -409,7 +409,7 @@ def main(args):
         donePar = queueTools.createBlankDoneMask(obsPars)
 
     # Run one call of obsUpdateRow as a test
-    allDates = ["2016/03/18",
+    allDates = [  # "2016/03/18",
                 "2016/03/19",
                 "2016/03/20",
                 "2016/03/21",

@@ -5,14 +5,23 @@ import matplotlib.pyplot as plt
 import datetime
 import os
 import sys
-import MMTEphem
+import re
 
 
 def strings2datetime(date, time):
+    """Convert a date and time string to a datetime."""
     y, m, d = map(int, date.split('/'))
     H, M, S = map(int, time.split(':'))
     dt = datetime.datetime(y, m, d, H, M, S)
     return dt
+
+
+def string2decTime(time):
+    """Convert a time to decimal."""
+    h, m, s = map(float, time.split(':'))
+    seconds = h*3600.0 + m*60.0 + s
+    return seconds / 3600.
+
 
 def main(argv):
     """Test code."""
@@ -22,50 +31,51 @@ def main(argv):
     startTime = []
     endTime = []
     field = []
-    date = []
-    initstartD = None
-    ii= 0
-    index = []
+    dates = []
+
     for line in f.readlines():
-        startD, startT, endD, endT, iiField = line.strip().split()
+        startD, startT, endD, endT, afield = line.strip().split()
 
-        date.append(startD)
-        startTime.append(strings2datetime(startD, startT))
-        endTime.append(strings2datetime(endD, endT))
-        field.append(iiField)
-        index.append(ii+0.5)
-        ii += 1
+        dates.append(startD)
+        startTime.append(string2decTime(startT))
+        endTime.append(string2decTime(endT))
 
-    udates = sorted(set(date))
+        reString = "^[a-zA-Z]+-[A-Za-z0-9]+_(.*)$"
+        m = re.search(reString, afield)
+        field.append(m.group(1))
 
-    plt.rcParams['font.size'] = 9
-    plt.plot(startTime, index, '>', color='darkblue')
-    plt.plot(endTime, index, '<', color='darkblue')
-
-    plt.ylim(max(index)+0.5, 0)
-    plt.xlim(min(startTime)-datetime.timedelta(hours=12),
-             max(endTime)+datetime.timedelta(hours=12))
-    plt.gcf().autofmt_xdate()
-
-    mindate = strings2datetime(min(udates), '00:00:00')
+    print(min(startTime), max(endTime))
+    udates = sorted(set(dates))
+    mindate = strings2datetime(min(udates), "00:00:00")
     maxdate = strings2datetime(max(udates), '00:00:00')
-    idate = mindate - datetime.timedelta(days=2)
-    while idate < maxdate+datetime.timedelta(days=2):
-        mmt = MMTEphem.ephem(idate)
-        plt.fill_between([mmt.eveningTwilight, mmt.morningTwilight],
-                        [-1, 100], alpha=0.25, color='darkblue')
 
-        idate += datetime.timedelta(days=1)
+    nDays = (maxdate-mindate).days
 
-    for ii in range(len(startTime)):
-        diff = (endTime[ii]-startTime[ii]).total_seconds()/2.0
-        xlabel = startTime[ii]-datetime.timedelta(seconds=diff*2)
-        ylabel = index[ii]-0.1
-        plt.annotate(field[ii], xy=(xlabel, ylabel))
+    plt.figure(figsize=(12, 12))
+    plt.plot([0, 0], [0, 0], visible=False)
+    plt.rcParams['font.size'] = 6
+
+    for ii in range(len(dates)):
+        idate = strings2datetime(dates[ii], "00:00:00")
+        index = (idate-mindate).days
+
+        # Package the rectangle
+        xval = [index - 0.45, index + 0.45]
+        y1 = [startTime[ii], startTime[ii]]
+        y2 = [endTime[ii], endTime[ii]]
+
+        plt.fill_between(xval, y1, y2, alpha=0.15, color='green')
+        plt.text(index, startTime[ii]+0.6*(endTime[ii]-startTime[ii]),
+                 field[ii], rotation=90)
 
     plt.title("MMIRS Schedule March 2016")
-    plt.xlabel("UT Date")
-    plt.ylabel("Obs Index")
+    plt.xlabel("Time (UT hour)")
+    plt.ylabel("Night")
+
+    plt.xlim(-0.8, nDays+0.8)
+    plt.ylim(max(endTime)+1, min(startTime)-1)
+    plt.grid(0)
+
     #plt.show()
     plt.savefig('schedule.png')
 
