@@ -65,9 +65,9 @@ def mmirsOverhead(fld):
     obstype = fld['obstype'].values[0]
 
     if obstype == 'mask':
-        return 1800.0
+        return 2700.0
     elif obstype == 'longslit':
-        return 300.0
+        return 1800.0
     elif obstype == 'imaging':
         return 120.0
     else:
@@ -418,7 +418,14 @@ def main(args):
                 "2016/03/26",
                 "2016/03/27",
                 "2016/03/28"]
-    for iter in range(4):
+
+    finishedFlag = False
+    for iter in range(5):
+
+        #Check to see if I reached a success mark
+        if finishedFlag is True:
+            continue
+
         print("")
         print("**** ITERATION # %i ********" % (iter+1))
         fullSched = []
@@ -450,9 +457,12 @@ def main(args):
             newDone.loc[ii, 'prevWeight'] = \
                 donePar.loc[ii, 'currentWeight']*(1-weightMod*0.9)
 
+        if min(allDone.values()) == 1:
+            # We've scheduled everything, stop iterating
+            finishedFlag = True
         newDone.loc[:, 'currentWeight'] = 0.0
         pprint(donePar)
-        if iter != 3:
+        if iter != 5:
             donePar = newDone
 
     # Format the schedule for output

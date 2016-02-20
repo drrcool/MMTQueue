@@ -38,7 +38,7 @@ def main(argv):
 
     udates = sorted(set(date))
 
-    plt.rcParams['font.size'] = 12
+    plt.rcParams['font.size'] = 9
     plt.plot(startTime, index, '>', color='darkblue')
     plt.plot(endTime, index, '<', color='darkblue')
 
@@ -66,7 +66,7 @@ def main(argv):
     plt.title("MMIRS Schedule March 2016")
     plt.xlabel("UT Date")
     plt.ylabel("Obs Index")
-    plt.show()
+    #plt.show()
     plt.savefig('schedule.png')
 
 if __name__ == "__main__":
