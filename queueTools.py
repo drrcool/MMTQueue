@@ -130,7 +130,10 @@ def createBlankDoneMask(obsFrame, startDay="1900/1/1", endDay="3000/1/1"):
         PI = obsFrame['PI'].values[ii]
         copyDict['objid'] = obsFrame['objid'].values[ii]
         copyDict['PI'] = obsFrame["PI"].values[ii]
-        copyDict['totalTime'] = allocatedTime[PI]
+        if PI in allocatedTime:
+            copyDict['totalTime'] = allocatedTime[PI]
+        else:
+            copyDict['totalTime'] = 0.01  # To avoid Nan
         dictList.append(copyDict)
 
     outFrame = DataFrame(dictList)

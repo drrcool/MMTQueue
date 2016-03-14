@@ -65,7 +65,7 @@ def mmirsOverhead(fld):
     obstype = fld['obstype'].values[0]
 
     if obstype == 'mask':
-        return 3600.0
+        return 2400.0
     elif obstype == 'longslit':
         return 1800.0
     elif obstype == 'imaging':
@@ -232,7 +232,7 @@ def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
     # how much we can
     nVisitsObservable = possVisits
 
-    while nVisitsObservable > 0:
+    while nVisitsObservable >= 1:
         totalTargetTime = expPerVisit*nVisitsObservable + mmirsOverhead(fld)
         tdelta = datetime.timedelta(seconds=totalTargetTime)
         endTime = startTime + tdelta
@@ -241,7 +241,7 @@ def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
         if isObservable(objEphem, endTime) == 1:
             return 1.0 * nVisitsObservable/repeats, endTime, nVisitsObservable
         else:
-            nVisitsObservable = -1
+            nVisitsObservable -= 1
 
     # If we get here, the object is never observable, return bad weight
     return 0, startTime, 0
@@ -287,13 +287,15 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         obsWeight['moonFlag'] = moonFlag
         obsWeight['nVisits'] = fitVisits
 
+        # Priority Weight
+        priorFlag = np.power(2, float(fld['priority'].values[0]))
+
         # Now combine the weights
         weightTAC = 1.0 - 1.0 * donefld['doneTime'].values[0] \
             / donefld['totalTime'].values[0]
         if weightTAC < 0:
             weightTAC = 0.001
-        totalWeight = fitWeight * moonFlag * (weightTAC)
-
+        totalWeight = fitWeight * moonFlag * (weightTAC)**2*priorFlag
         # We need to account for a few extra things.
         # 1. I want fields that have had previously observed
         #    fields to be the top priority if they are observable.
@@ -305,7 +307,6 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         # Now account for weighting from preivous iteration of the
         # code. This should smooth things out
         totalWeight = totalWeight * donefld['prevWeight'].values[0]
-
         obsWeight['totalWeight'] = totalWeight
         # Append to weight listing
         weightList.append(obsWeight)
@@ -413,7 +414,7 @@ def main(args):
         donePar = queueTools.createBlankDoneMask(obsPars)
 
     # Run one call of obsUpdateRow as a test
-    allDates = [  # "2016/03/18",
+    allDates = ["2016/03/18",
                 "2016/03/19",
                 "2016/03/20",
                 "2016/03/21",
@@ -426,7 +427,7 @@ def main(args):
     finishedFlag = False
     for iter in range(5):
 
-        #Check to see if I reached a success mark
+        # Check to see if I reached a success mark
         if finishedFlag is True:
             continue
 
