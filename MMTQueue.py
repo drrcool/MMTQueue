@@ -398,7 +398,11 @@ def obsOneNight(fldPar, donePar, date):
 def main(args):
     """Main module where the bulk of the work is completed."""
     # Get all of the observations for this dataset
-    obsPars = queueTools.readAllFLDfiles()
+    if len(args) > 1:
+        trimester = args[1]
+    else:
+        trimester = None  # The default is handled in queueTools
+    obsPars = queueTools.readAllFLDfiles(trimester)
 
     # Create the blank done file if it doesn't exist
     donefile = 'mmirs_catalogs/donelist.txt'
