@@ -1,0 +1,6 @@
+pi	Ichilingarian
+program	SAO-7
+objid	ra	dec	pmra	pmdec	pa	moon	exptime	nexp	repeats	oneper	priority	grism	filter	epoch	dithersize	seeing	photometric	readtab	gain	obstype	mag	mask
+-----	--	---	----	-----	--	----	-------	----	-------	------	--------	-----	------	-----	----------	------	-----------	-------	----	-------	---	----
+SAO-7_m1149z1	11:49:32.4970	22:23:49.450	0.0	0.0	   35.000	bright	5.0000 	4	89	0	1	J	zJ	J2000.0	1.6	1.0	N	ramp_4.426	0.95	mask	24	m1149z1
+

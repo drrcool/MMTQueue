@@ -58,6 +58,8 @@ Need to write a routine that checks if the moon is up at start and at end.  It's
   H, they asked for 120mx4x5 instead of 6x4x5. I did a search and replace to fix
   this.
 * Coordiante for a1689 for Chilingarian was not entered.
+* Berger test object has 0 repeats. Changed to 1
+* One of smith's targets has 0 repeats. Changed to 1
 
 
 

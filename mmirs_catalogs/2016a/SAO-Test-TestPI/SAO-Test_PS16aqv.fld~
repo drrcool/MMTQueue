@@ -1,0 +1,5 @@
+pi	TestPI
+program	SAO-Test
+objid	ra	dec	pmra	pmdec	pa	moon	exptime	nexp	repeats	oneper	priority	grism	filter	epoch	dithersize	seeing	photometric	readtab	gain	obstype	mag	mask
+-----	--	---	----	-----	--	----	-------	----	-------	------	--------	-----	------	-----	----------	------	-----------	-------	----	-------	---	----
+SAO-Test_PS16aqv	14:10:44.55	-10:09:35.3	0.000	0.00	0	bright	5.0000 	6	0	0	1	J	zJ	J2000.0	0.0	3.0	N	ramp_1.475	0.95	longslit	18	5pixel-long

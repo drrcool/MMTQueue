@@ -24,6 +24,7 @@ import queueTools
 import MMTEphem
 import math
 import datetime
+import plotSchedule
 import ephem as pyEphem
 from random import randint
 from pprint import pprint
@@ -288,7 +289,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         obsWeight['nVisits'] = fitVisits
 
         # Priority Weight
-        priorFlag = np.power(2, float(fld['priority'].values[0]))
+        priorFlag = 1.0 / float(fld['priority'])
 
         # Now combine the weights
         weightTAC = 1.0 - 1.0 * donefld['doneTime'].values[0] \
@@ -405,13 +406,26 @@ def main(args):
         trimester = None  # The default is handled in queueTools
     obsPars = queueTools.readAllFLDfiles(trimester)
 
+
     # Create the blank done file if it doesn't exist
-    donefile = 'mmirs_catalogs/donelist.txt'
+    donePar = queueTools.createBlankDoneMask(obsPars)
+
+    donefile = 'donefile.dat'
     if os.path.isfile(donefile):
         # Read in the existing file
-        pass
-    else:
-        donePar = queueTools.createBlankDoneMask(obsPars)
+        f = open(donefile)
+        for line in f.readlines():
+            if line[0] != "#":
+                split = line.split()
+                id = split[0]
+                pi = split[1]
+                visits = float(split[2])
+                donetime = float(split[3])
+
+
+                donePar.loc[donePar['objid']==id, 'doneVisit'] = visits
+                donePar.loc[donePar['PI']==pi, 'doneTime'] += donetime
+
 
     # Run one call of obsUpdateRow as a test
     allDates = ["2016/03/18",
@@ -484,6 +498,7 @@ def main(args):
         f.write("%s %s %s\n" % (outStart, outEnd, field))
 
     f.close()
+    plotSchedule.main([])
 
 if __name__ == "__main__":
     main(sys.argv)

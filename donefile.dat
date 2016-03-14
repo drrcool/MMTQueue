@@ -1,0 +1,3 @@
+# This file contains a list of partially completed masks
+# typically from one run in the event the queue needs to be re-created midrun
+#objID    PI  CompletedRepeats     totalTimeCompleted
