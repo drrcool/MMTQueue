@@ -82,8 +82,9 @@ def readAllFLDfiles(path=None):
     """Read all FLD files in path (or a walk through path)."""
 
     # Path
-    if path is None:
-        path = '/Users/rcool/MMTQueue/mmirs_catalogs/'
+    pathroot = '/Users/rcool/MMTQueue/mmirs_catalogs/'
+    path = pathroot + (path or '2016a')
+
     f = []
     for (dirpath, dirnames, filenames) in walk(path):
         f.extend([dirpath+'/'+f for f in filenames])
