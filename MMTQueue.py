@@ -65,7 +65,7 @@ def mmirsOverhead(fld):
     obstype = fld['obstype'].values[0]
 
     if obstype == 'mask':
-        return 2400.0
+        return 3600.0
     elif obstype == 'longslit':
         return 1800.0
     elif obstype == 'imaging':
