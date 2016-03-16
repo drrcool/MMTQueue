@@ -82,7 +82,7 @@ def readAllFLDfiles(path=None):
     """Read all FLD files in path (or a walk through path)."""
 
     # Path
-    pathroot = '/Users/rcool/MMTQueue/mmirs_catalogs/'
+    pathroot = 'mmirs_catalogs/'
     path = pathroot + (path or '2016a')
 
     f = []
