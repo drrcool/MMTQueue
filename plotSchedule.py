@@ -53,7 +53,7 @@ def main(argv):
 
     plt.figure(figsize=(12, 12))
     plt.plot([0, 0], [0, 0], visible=False)
-    plt.rcParams['font.size'] = 8
+    plt.rcParams['font.size'] = 6
 
     xpos = []
     for ii in range(len(dates)):
@@ -67,7 +67,7 @@ def main(argv):
 
         plt.fill_between(xval, y1, y2, alpha=0.15)
         plt.text(index, startTime[ii]+0.5*(endTime[ii]-startTime[ii]),
-                 field[ii], rotation=90, va='center')
+                 field[ii], rotation=0, va='center', ha='center')
 
     plt.title("MMIRS Schedule March 2016")
     plt.ylabel("Time (UT hour)")
