@@ -34,7 +34,7 @@ def main(argv):
     dates = []
 
     for line in f.readlines():
-        startD, startT, endD, endT, afield = line.strip().split()
+        startD, startT, endD, endT, afield, nvisit = line.strip().split()
 
         dates.append(startD)
         startTime.append(string2decTime(startT))
@@ -53,7 +53,7 @@ def main(argv):
 
     plt.figure(figsize=(12, 12))
     plt.plot([0, 0], [0, 0], visible=False)
-    plt.rcParams['font.size'] = 12
+    plt.rcParams['font.size'] = 8
 
     xpos = []
     for ii in range(len(dates)):

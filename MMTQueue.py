@@ -68,7 +68,7 @@ def mmirsOverhead(fld):
     if obstype == 'mask':
         return 3600.0
     elif obstype == 'longslit':
-        return 1800.0
+        return 900.0
     elif obstype == 'imaging':
         return 120.0
     else:
@@ -303,7 +303,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         # This modification will weight fields with no observations
         # at one (1+0) and those partially observed at 10
         partCompWeight = int(donefld['doneVisit'].values[0] > 0)
-        totalWeight = totalWeight * (1+9.0*partCompWeight)
+        totalWeight = totalWeight * (1+2*partCompWeight)
 
         # Now account for weighting from preivous iteration of the
         # code. This should smooth things out
@@ -332,7 +332,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         # No targets were done.
         return None
     else:
-        randIndex = hasMax[randint(0, len(hasMax)-1)]
+        randIndex = hasMax[0]
 
         diffTime = obsWeights['obsTime'].values[randIndex]
         # Increment the schedule
@@ -340,6 +340,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         schedule.append(startTime)
         schedule.append(diffTime)
         schedule.append(obsWeights['objid'].values[randIndex])
+        schedule.append(obsWeights['nVisits'].values[randIndex])
 
         # Update the done masks
         index = [i for i, x in enumerate(donePar['objid'] ==
@@ -406,7 +407,6 @@ def main(args):
         trimester = None  # The default is handled in queueTools
     obsPars = queueTools.readAllFLDfiles(trimester)
 
-
     # Create the blank done file if it doesn't exist
     donePar = queueTools.createBlankDoneMask(obsPars)
 
@@ -422,21 +422,17 @@ def main(args):
                 visits = float(split[2])
                 donetime = float(split[3])
 
-
-                donePar.loc[donePar['objid']==id, 'doneVisit'] = visits
-                donePar.loc[donePar['PI']==pi, 'doneTime'] += donetime
-
+                donePar.loc[donePar['objid'] == id, 'doneVisit'] = visits
+                donePar.loc[donePar['PI'] == pi, 'doneTime'] += donetime
 
     # Run one call of obsUpdateRow as a test
-    allDates = ["2016/03/18",
-                "2016/03/19",
-                "2016/03/20",
-                "2016/03/21",
-                "2016/03/24",
-                "2016/03/25",
-                "2016/03/26",
-                "2016/03/27",
-                "2016/03/28"]
+    date_file = "fitdates.dat"
+    f = open(date_file, 'r')
+    allDates = []
+    for line in f.readlines():
+        allDates.append(line.strip())
+    print(allDates)
+
 
     finishedFlag = False
     for iter in range(5):
@@ -490,12 +486,13 @@ def main(args):
         startTime = sched[0]
         duration = sched[1]
         field = sched[2]
+        nVisit = sched[3]
 
         FORMAT = "%Y/%m/%d %H:%M:%S"
         outStart = startTime.strftime(FORMAT)
         endTime = startTime + datetime.timedelta(seconds=duration)
         outEnd = endTime.strftime(FORMAT)
-        f.write("%s %s %s\n" % (outStart, outEnd, field))
+        f.write("%s %s %s %s\n" % (outStart, outEnd, field, nVisit))
 
     f.close()
     plotSchedule.main([])

@@ -60,8 +60,21 @@ Need to write a routine that checks if the moon is up at start and at end.  It's
 * Coordiante for a1689 for Chilingarian was not entered.
 * Berger test object has 0 repeats. Changed to 1
 * One of smith's targets has 0 repeats. Changed to 1
+* Most of smith's targets have 0 repeats
+
 
 
 
   # Run the code
   python MMTQueue.py 2016a
+  python queue_summary.py 2016a > schedule_notes.txt
+
+  If you want to modify the queue mid run, you will need to edit the donefile.dat
+  file. The columns are labeled, but you will need to included
+  ObjID (field name)  PI (must match scheduled name)  CompletedRepeats (how many ditherpatterns were completed previously, this should be a total) totalTimeCompleted (how much time was spent on their target previously, including overheads)
+
+  Then you will need to modify fitdates.dat. These are the days to include in the new
+  schedule. Clearly, remove dates that have passed.  Also ** NOTE THAT THESE ARE UT
+  DATES (so local date +1) **
+
+  You'll want to send schedule.pdf and schedule_notes.txt to queue observers
