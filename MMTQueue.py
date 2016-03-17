@@ -68,7 +68,7 @@ def mmirsOverhead(fld):
     if obstype == 'mask':
         return 3600.0
     elif obstype == 'longslit':
-        return 900.0
+        return 1800.0
     elif obstype == 'imaging':
         return 120.0
     else:
@@ -303,7 +303,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         # This modification will weight fields with no observations
         # at one (1+0) and those partially observed at 10
         partCompWeight = int(donefld['doneVisit'].values[0] > 0)
-        totalWeight = totalWeight * (1+2*partCompWeight)
+        totalWeight = totalWeight * (1+0.5*partCompWeight)
 
         # Now account for weighting from preivous iteration of the
         # code. This should smooth things out
@@ -332,6 +332,9 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         # No targets were done.
         return None
     else:
+
+        # This allows for random choice.
+        # randIndex = hasMax[randint(0, len(hasMax)-1)]
         randIndex = hasMax[0]
 
         diffTime = obsWeights['obsTime'].values[randIndex]
