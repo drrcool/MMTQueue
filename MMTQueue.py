@@ -49,10 +49,8 @@ def isObservable(objEphem, endTime, fld):
     val, idx = min((val, idx) for (idx, val) in enumerate(tarray))
 
     pa = float(fld['pa'].values[0])
-    if (fld['obstype'].values[0] == 'mask') or (fld['pa'].values[0] != 0):
-        rotObservable = getRotatorObservable(objEphem, endTime, pa)
-    else:
-        rotObservable = 1
+    rotObservable = getRotatorObservable(objEphem, endTime, pa)
+    
 
     return objEphem.observable[idx] * rotObservable
 
