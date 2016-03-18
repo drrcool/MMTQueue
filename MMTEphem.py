@@ -17,7 +17,8 @@ def targetObservability(time, airmass):
 
     Returns : 0 if not observable 1 if observable
     """
-    airmassCutoff = 2.5
+    airmassCutoff = 1.8
+
     # When the target sets the "airmass" goes negative. That's bad
     if (airmass > 1.0) and (airmass < airmassCutoff):
         return 1
@@ -93,6 +94,16 @@ def mmtAltAz(mmt, ra, dec, dateTime):
 
     return star.alt*180.0/math.pi, star.az*180/math.pi
 
+def mmtParAngle(mmt, ra, dec, dateTime):
+    """Return the Alt/AZ for a given RA/DEC at specified time."""
+    star = pyEphem.FixedBody()
+    star._ra = ra
+    star._dec = dec
+    star._epoch = pyEphem.J2000
+    mmt.mmtObserver.date = dateTime
+    star.compute(mmt.mmtObserver)
+
+    return star.parallactic_angle()
 
 def alt2airmass(alt):
     """Given an altitude angle (in degrees), calcualte the airmass."""
@@ -102,6 +113,23 @@ def alt2airmass(alt):
 
     return airmass
 
+def parAngleCurve(mmt, ra, dec):
+    """Return the run of airmass as a function of time."""
+    startTime = mmt.sunset
+    endTime = mmt.sunrise
+
+    timedelta = datetime.timedelta(minutes=5)
+
+    timeArray = [startTime]
+    while (timeArray[-1] < endTime):
+        timeArray.append(timeArray[-1]+timedelta)
+
+    airmass = []
+    for time in timeArray:
+        parAngle = mmtParAngle(mmt, ra, dec, time)
+        airmass.append(parAngle)
+
+    return timeArray, airmass
 
 def airmassCurve(mmt, ra, dec):
     """Return the run of airmass as a function of time."""
@@ -167,6 +195,7 @@ class ObjEphem(object):
 
         # Set a hard limit of observablity to be 2.5 airmasses
         timeArray, airmass = airmassCurve(mmtEphem, ra, dec)
+        timeArray, parAngle = parAngleCurve(mmtEphem, ra, dec)
 
         observability = []
         for ii in range(len(airmass)):
@@ -178,7 +207,7 @@ class ObjEphem(object):
         self.dec = dec
         self.time = timeArray
         self.airmass = airmass
-
+        self.parAngle = parAngle
 
 if __name__ == "__main__":
     mmt = ObjEphem("8:00:00", "30:00:00", "2016/02/09")

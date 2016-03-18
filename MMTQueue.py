@@ -30,12 +30,47 @@ from random import randint
 from pprint import pprint
 
 
-def isObservable(objEphem, endTime):
+def hms2dec(string):
+
+    if string[0] == '-':
+        string = string[1:]
+        sign = -1.0
+    else:
+        sign = 1.0
+
+    split = string.split(':')
+    return sign * (float(split[0]) +
+                   float(split[1])/60. + float(split[2])/3600.)
+
+
+def isObservable(objEphem, endTime, fld):
     """Return a binary bit if target is observable at given time."""
     tarray = [abs(x-endTime).total_seconds() for x in objEphem.time]
     val, idx = min((val, idx) for (idx, val) in enumerate(tarray))
 
-    return objEphem.observable[idx]
+    pa = float(fld['pa'].values[0])
+    if (fld['obstype'].values[0] == 'mask') or (fld['pa'].values[0] != 0):
+        rotObservable = getRotatorObservable(objEphem, endTime, pa)
+    else:
+        rotObservable = 1
+
+    return objEphem.observable[idx] * rotObservable
+
+
+def getRotatorObservable(objEphem, time, pa):
+    """Given a time and object ephemeris, calculate if rotator is in limits."""
+    rot_limits = [-180, 164]
+
+    tarray = [abs(x-time).total_seconds() for x in objEphem.time]
+    val, idx = min((val, idx) for (idx, val) in enumerate(tarray))
+
+    parAngle = float(objEphem.parAngle[idx])
+    rotAngle = parAngle*180/np.pi - pa
+
+    if (rotAngle > rot_limits[0]) and (rotAngle < rot_limits[1]):
+        return 1
+    else:
+        return 0
 
 
 def angSep(ra1, dec1, ra2, dec2):
@@ -164,6 +199,10 @@ def calcMoonFlag(fld, startTime, endTime, mmt):
     else:
         illumFlag = 0   # This isn't going to work here!
 
+    # Flag things that are just plain too close to the moon
+    if moonDist < 10:
+        illumFlag = 0
+
     return illumFlag
 
 
@@ -199,7 +238,7 @@ def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
     timeRemaining = (nightEnd - startTime).total_seconds()  # In seconds
 
     # Is the target observable at the StartTime?
-    if isObservable(objEphem, startTime) == 0:
+    if isObservable(objEphem, startTime, fld) == 0:
         return 0.0, startTime, 0
 
     # This loop may be specific for MMIRS as BINOSPEC
@@ -224,7 +263,7 @@ def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
         # Now, let's see if the target is still observable at the end of
         # the block
         endTime = startTime + tdelta
-        if isObservable(objEphem, endTime) == 1:
+        if isObservable(objEphem, endTime, fld) == 1:
             return 1.0, endTime, repeats
         else:
             possVisits = repeats
@@ -239,7 +278,7 @@ def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
         endTime = startTime + tdelta
 
         # Check to see if it's observable at the end of the window
-        if isObservable(objEphem, endTime) == 1:
+        if isObservable(objEphem, endTime, fld) == 1:
             return 1.0 * nVisitsObservable/repeats, endTime, nVisitsObservable
         else:
             nVisitsObservable -= 1
@@ -248,7 +287,7 @@ def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
     return 0, startTime, 0
 
 
-def obsUpdateRow(fldPar, donePar, startTime, mmt):
+def obsUpdateRow(fldPar, donePar, startTime, mmt, prevPos=None):
     """Calculate observing weight for given observation.
 
     Input:
@@ -283,27 +322,40 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
                                                         donefld)
         moonFlag = calcMoonFlag(fld, startTime, endTime, mmt)
 
+        # Does this observation have one very close by
+        dist_weight = 1
+        if prevPos is not None:
+
+            dist = angSep(hms2dec(fld['ra'].values[0])*15.0,
+                          hms2dec(fld['dec'].values[0]),
+                          prevPos[0], prevPos[1])
+            if dist < 10./3600.:
+                dist_weight = 1000
+
         obsWeight['fitWeight'] = fitWeight
         obsWeight['obsTime'] = (endTime-startTime).total_seconds()
         obsWeight['moonFlag'] = moonFlag
         obsWeight['nVisits'] = fitVisits
+        obsWeight['ra'] = fld['ra'].values[0]
+        obsWeight['dec'] = fld['dec'].values[0]
 
         # Priority Weight
-        priorFlag = 1.0 / float(fld['priority'])
+        priorFlag = 100.0/float(fld['priority'])**3
 
         # Now combine the weights
         weightTAC = 1.0 - 1.0 * donefld['doneTime'].values[0] \
             / donefld['totalTime'].values[0]
         if weightTAC < 0:
             weightTAC = 0.001
-        totalWeight = fitWeight * moonFlag * (weightTAC)**2*priorFlag
+        totalWeight = fitWeight * moonFlag * \
+            (weightTAC)**2 * priorFlag*dist_weight
         # We need to account for a few extra things.
         # 1. I want fields that have had previously observed
         #    fields to be the top priority if they are observable.
         # This modification will weight fields with no observations
         # at one (1+0) and those partially observed at 10
         partCompWeight = int(donefld['doneVisit'].values[0] > 0)
-        totalWeight = totalWeight * (1+0.5*partCompWeight)
+        totalWeight = totalWeight * (1+5*partCompWeight)
 
         # Now account for weighting from preivous iteration of the
         # code. This should smooth things out
@@ -319,7 +371,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
 
     # Check to see there are actually targets!
     if len(obsWeights) == 0:
-        return None
+        return None, None
 
     maxWeight = max(obsWeights['totalWeight'])
     for ii in range(len(obsWeights)):
@@ -330,12 +382,11 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
     # Observe a random one
     if maxWeight == 0:
         # No targets were done.
-        return None
+        return None, None
     else:
 
         # This allows for random choice.
-        # randIndex = hasMax[randint(0, len(hasMax)-1)]
-        randIndex = hasMax[0]
+        randIndex = hasMax[randint(0, len(hasMax)-1)]
 
         diffTime = obsWeights['obsTime'].values[randIndex]
         # Increment the schedule
@@ -344,6 +395,9 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
         schedule.append(diffTime)
         schedule.append(obsWeights['objid'].values[randIndex])
         schedule.append(obsWeights['nVisits'].values[randIndex])
+        outPos = [hms2dec(obsWeights['ra'].values[randIndex])*15.0,
+                  hms2dec(obsWeights['dec'].values[randIndex])]
+
 
         # Update the done masks
         index = [i for i, x in enumerate(donePar['objid'] ==
@@ -368,7 +422,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt):
                                schedule[2]]["repeats"].values[0])
         if int(donePar.loc[index, 'doneVisit']) >= requested:
             donePar.loc[index, 'complete'] = 1
-        return schedule
+        return schedule, outPos
 
 
 def obsOneNight(fldPar, donePar, date):
@@ -383,8 +437,10 @@ def obsOneNight(fldPar, donePar, date):
     currentTime = startTime
     schedule = []  # Will contain scheduled fields
     allDone = False
+    prevPos = None
     while (currentTime < mmt.morningTwilight) & (allDone is False):
-        newSched = obsUpdateRow(fldPar, donePar, currentTime, mmt)
+        newSched, prevPos = obsUpdateRow(fldPar, donePar,
+                                        currentTime, mmt, prevPos)
         # Check to see if something was observed
         if newSched is None:
             # Increment time and continue
@@ -434,8 +490,6 @@ def main(args):
     allDates = []
     for line in f.readlines():
         allDates.append(line.strip())
-    print(allDates)
-
 
     finishedFlag = False
     for iter in range(5):

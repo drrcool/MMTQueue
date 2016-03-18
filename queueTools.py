@@ -13,6 +13,21 @@ from os import walk
 import MMTEphem
 import ephem as pyEphem
 
+
+def parse_mask_rotator_files(mask, path):
+    """Parse mask files for the rotator information."""
+    f = []
+    maskfiles = path + '/' + mask + '.msk'
+
+    f = open(maskfiles, 'r')
+    for line in f.readlines():
+        split = line.strip().split()
+
+        if len(split) > 1 and split[0] == 'pa':
+            return float(split[1])
+    return False
+
+
 def readAllocatedTime(startDay="1900/1/1", endDay="3000/1/1"):
     """Read a log file to determine how much each PI was allocated."""
     filename = "AllocatedTime.dat"
@@ -22,7 +37,6 @@ def readAllocatedTime(startDay="1900/1/1", endDay="3000/1/1"):
         startDay = pyEphem.date(startDay).datetime()
     if type(endDay) == str:
         endDay = pyEphem.date(endDay).datetime()
-
 
     allocatedTime = {}
     for line in f.readlines():
@@ -49,7 +63,7 @@ def readAllocatedTime(startDay="1900/1/1", endDay="3000/1/1"):
     return allocatedTime
 
 
-def readFLDfile(fileName):
+def readFLDfile(fileName, trimester):
     """Read FLD file and return a dictionary with relavent information."""
     # Intiialize output dictionary
     obspars = {}
@@ -75,6 +89,10 @@ def readFLDfile(fileName):
     for key, val in zip(keywords, values):
         obspars[key] = val
 
+    if obspars['obstype'] == 'mask':
+        obspars['pa'] = parse_mask_rotator_files(
+                            obspars['mask'], trimester)
+
     return obspars
 
 
@@ -93,7 +111,7 @@ def readAllFLDfiles(path=None):
 
     dictList = []
     for file in outfiles:
-        df = readFLDfile(file)
+        df = readFLDfile(file, path)
         dictList.append(df)
 
     outFrame = DataFrame(dictList)
