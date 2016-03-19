@@ -50,7 +50,7 @@ def isObservable(objEphem, endTime, fld):
 
     pa = float(fld['pa'].values[0])
     rotObservable = getRotatorObservable(objEphem, endTime, pa)
-    
+
 
     return objEphem.observable[idx] * rotObservable
 
@@ -353,7 +353,7 @@ def obsUpdateRow(fldPar, donePar, startTime, mmt, prevPos=None):
         # This modification will weight fields with no observations
         # at one (1+0) and those partially observed at 10
         partCompWeight = int(donefld['doneVisit'].values[0] > 0)
-        totalWeight = totalWeight * (1+5*partCompWeight)
+        totalWeight = totalWeight * (1+2*partCompWeight)
 
         # Now account for weighting from preivous iteration of the
         # code. This should smooth things out
@@ -473,21 +473,28 @@ def main(args):
         f = open(donefile)
         for line in f.readlines():
             if line[0] != "#":
-                split = line.split()
+                split = line.strip().split()
                 id = split[0]
                 pi = split[1]
                 visits = float(split[2])
                 donetime = float(split[3])
+                completed = int(split[4])
+
+                if max(donePar['objid'] == id) is "False":
+                    raise Exception("No Match found for %s" % id)
 
                 donePar.loc[donePar['objid'] == id, 'doneVisit'] = visits
                 donePar.loc[donePar['PI'] == pi, 'doneTime'] += donetime
+                donePar.loc[donePar['objid'] == id, 'complete'] = completed
 
+    origDonePar = donePar.copy()
     # Run one call of obsUpdateRow as a test
     date_file = "fitdates.dat"
     f = open(date_file, 'r')
     allDates = []
     for line in f.readlines():
-        allDates.append(line.strip())
+        if line[0] != '#':
+            allDates.append(line.strip())
 
     finishedFlag = False
     for iter in range(5):
@@ -508,9 +515,11 @@ def main(args):
         # Now, fill in previous weights and zero out entries in a
         # new donePar
         newDone = donePar.copy()
-        newDone.loc[:, 'complete'] = 0
-        newDone.loc[:, 'doneTime'] = 0.0
-        newDone.loc[:, 'doneVisit'] = 0.0
+
+        newDone.loc[:, 'complete'] = origDonePar['complete']
+        newDone.loc[:, 'doneTime'] = origDonePar['doneTime']
+        newDone.loc[:, 'doneVisit'] = origDonePar['doneVisit']
+        
 
         # Make a list of PIS and see if they got all the fields they
         # asked for.
