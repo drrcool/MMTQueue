@@ -3,9 +3,13 @@
 #objID    PI  CompletedRepeats     totalTimeCompleted 	 Completed?
 SAO-Test_PS16aqv   TestPI 	   1		   1.0	 1
 UAO-S200_J13522_J  Smith	   1		   0.5	 1
+UAO-S143_gdnel31_J  DStark	   12		   5.0	 1
 UAO-S143_gdnel31_H  DStark	   10		   3.0	 1
 UAO-S200_SN2015as_HK Smith	   1		   0.5	 1
-SAO-7_m1149z1 Ichilingarian	   7		   3.2	 0
+SAO-7_m1149z1 Ichilingarian	   40		   15.0	 0
 UAO-S200_SN2016X_J  Smith	   1		   0.75	 1
 UAO-S200_SN2016X_HK Smith	   1		   0.5	 1
 UAO-S143_egsel41_H DStark	   1		   0.5	 0
+UAO-S200_SN2015as_J Smith	   1		   1.0	 1
+UAO-S143_egsel31_J  DStark	   2		   1.0	 0
+UAO-S200_ASASSN15rb Smith	   1		   1.0	 1
