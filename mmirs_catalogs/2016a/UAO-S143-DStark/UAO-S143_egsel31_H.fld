@@ -2,4 +2,4 @@ pi	DStark
 program	UAO-S143
 objid	ra	dec	pmra	pmdec	pa	moon	exptime	nexp	repeats	oneper	priority	grism	filter	epoch	dithersize	seeing	photometric	readtab	gain	obstype	mag	mask
 -----	--	---	----	-----	--	----	-------	----	-------	------	--------	-----	------	-----	----------	------	-----------	-------	----	-------	---	----
-UAO-S143_egsel31_H	14:19:25.9730	52:50:08.430	0.0	0.0	  177.000	bright	6 	4	5	0	1	H3000	H	J2000.0	1.8	1.0	N	ramp_4.426	0.95	mask	25	egsel31
+UAO-S143_egsel31_H	14:19:25.9730	52:50:08.430	0.0	0.0	  177.000	bright	5 	4	6	0	1	H3000	H	J2000.0	1.8	1.0	N	ramp_4.426	0.95	mask	25	egsel31
