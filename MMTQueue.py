@@ -474,7 +474,8 @@ def main(args):
         # Read in the existing file
         f = open(donefile)
         for line in f.readlines():
-            if line[0] != "#":
+            if line[0] != "#" and line.strip() != '':
+		
                 split = line.strip().split()
                 id = split[0]
                 pi = split[1]
@@ -484,7 +485,9 @@ def main(args):
 
                 if max(donePar['objid'] == id) is "False":
                     raise Exception("No Match found for %s" % id)
-
+                if donePar.loc[donePar['objid'] == id, 'doneVisit'].max() > 0:
+                    raise Exception("Field %s is listed multiple times in donefile" % id)
+		
                 donePar.loc[donePar['objid'] == id, 'doneVisit'] = visits
                 donePar.loc[donePar['PI'] == pi, 'doneTime'] += donetime
                 donePar.loc[donePar['objid'] == id, 'complete'] = completed
