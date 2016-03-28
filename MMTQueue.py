@@ -564,7 +564,6 @@ def main(args):
         f.write("%s %s %s %s\n" % (outStart, outEnd, field, nVisit))
 
     f.close()
-    plotSchedule.main([])
 
 if __name__ == "__main__":
     main(sys.argv)
