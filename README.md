@@ -9,7 +9,7 @@ Please contact Richard Cool for questions or concerns (rcool@mmto.org).
 
 This code is **not** production level at this point.  Work is ongoing.
 
-## Current Needs
+## TODOS
 
 1. Better input from the astronomers
   * Getting faulty or incomplete details was the biggest issue
@@ -31,4 +31,4 @@ This code is **not** production level at this point.  Work is ongoing.
    globally lower priority than priority 1. This should change.
 3. Reevaluate how we do fractional fields. This may be biasing us?
 4. Look at re-implementing partial completeness as a flag for ranking within
-   a single PI. 
+   a single PI.
