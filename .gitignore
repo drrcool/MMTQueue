@@ -1,3 +1,4 @@
 .ipy*
 *~
 *pyc
+.DS_Store
