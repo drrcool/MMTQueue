@@ -1,569 +1,422 @@
-"""Queue software for observations at the MMT Observatory.
+""" Queue software for observations at the MMT observatory.
 
-This is the main module for the MMT queue sytem.  A number of
-ancillary files will be utilized as well to keep some of the
-software modular.
+This version is an overhaul of the first system to make it more object
+oriented and remove a lot of useless recalculation.
 
-$ MMTQueue.py startDate endDate
-
-
-Input : startDate -- first night in the observing block
-        endDate -- last night in the observing block
-Output : Schedule for each night starting with startDate and
-         ending with endDate (inclusive) assuming good conditions.
-
-More to come as code is fleshed out.
+See the ancillary README and documentation for file formats and instructions.
 """
 
-# Imports
-import sys
-import os.path
+from os import walk
+import ephem as pyEphem
+import datetime
 import numpy as np
 import pandas as pd
-import queueTools
-import MMTEphem
-import math
-import datetime
-import plotSchedule
-import ephem as pyEphem
-from random import randint
-from pprint import pprint
 
 
 def hms2dec(string):
+    """Convert a string hms to a float value.
 
+    Inputs : string in formation (+/-)HH:MM:SS
+    Output : float value.
+
+    Note, ra will return decimal *hours*, so the conversion factor
+    of 15 should be applied after using this function.
+    """
+    # We need to treat the sign in a special way (-3:30 isn't -2.5, it's -3.5)
     if string[0] == '-':
         string = string[1:]
         sign = -1.0
     else:
         sign = 1.0
 
-    split = string.split(':')
-    return sign * (float(split[0]) +
-                   float(split[1])/60. + float(split[2])/3600.)
+    h, m, s = map(float, string.split(':'))
+
+    return sign*(h+m/60.0+s/3600.0)
 
 
-def isObservable(objEphem, endTime, fld):
-    """Return a binary bit if target is observable at given time."""
-    tarray = [abs(x-endTime).total_seconds() for x in objEphem.time]
-    val, idx = min((val, idx) for (idx, val) in enumerate(tarray))
+def AngSep(ra1, dec1, ra2, dec2):
+    """Calcualte the angular separation between two points on the sky.
 
-    pa = float(fld['pa'].values[0])
-    rotObservable = getRotatorObservable(objEphem, endTime, pa)
+    All inputs are Ephem Angles (so decimal radians)
 
-
-    return objEphem.observable[idx] * rotObservable
-
-
-def getRotatorObservable(objEphem, time, pa):
-    """Given a time and object ephemeris, calculate if rotator is in limits."""
-    rot_limits = [-180, 164]
-
-    tarray = [abs(x-time).total_seconds() for x in objEphem.time]
-    val, idx = min((val, idx) for (idx, val) in enumerate(tarray))
-
-    parAngle = float(objEphem.parAngle[idx])
-    rotAngle = parAngle*180/np.pi - pa
-    if rotAngle < -180:
-        rotAngle += 360
-
-    if (rotAngle > rot_limits[0]) and (rotAngle < rot_limits[1]):
-        return 1
-    else:
-        return 0
-
-
-def angSep(ra1, dec1, ra2, dec2):
-    """Calculate the angular separation between two points on the sky.
-
-    ALL INPUTS ARE Ephem Angles (so decimal ***RADIANS***).
-
-    OUTPUT IS IN DECIMAL DEGREES
+    Output is in decimal degrees.
     """
-    y = math.cos(dec1) * math.cos(dec2)
-    z = math.sin(dec1) * math.sin(dec2)
-    x = math.cos(ra1-ra2)
+    y = np.cos(dec1) * np.cos(dec2)
+    z = np.sin(dec1) * np.sin(dec2)
+    x = np.cos(ra1 - ra2)
 
     rad = np.arccos(z+y*x)
 
+    # For small separations, use Euclidean distance
     if (rad < 0.000004848):
-        sep = math.sqrt((math.cos(dec1)*(ra1-ra2))**2 +
-                        (dec1-dec2)**2)
+        sep = np.sqrt((np.cos(dec1)*(ra1-ra2))**2 + (dec1-dec2)**2)
     else:
         sep = rad
 
-    return sep * 180 / math.pi
+    return sep*180.0 / np.pi
 
 
-def mmirsOverhead(fld):
-    """Return the expected overhead time (in seconds) for MMIRS observation."""
+def mmirs_overheads(fldPar):
+    """Return the expected overhead time (in seconds) for the observation.
 
-    obstype = fld['obstype'].values[0]
+    For now, we assume the overhead is constant per configuration. It's
+    quite possible that this assumption will need to be re-evaluated (for
+    example to account for checking alignment every few hours on longer
+    exposures).
+
+    These numbers are also fairly pessimistic. As observer efficiency increases
+    we can decrease these to match what we're seeing in operations.
+    """
+
+    obstype = fldPar['obstype'].values[0]
 
     if obstype == 'mask':
-        return 1800.0
+        return 2700.0
     elif obstype == 'longslit':
         return 1800.0
     elif obstype == 'imaging':
         return 120.0
     else:
-        # Make sure we return one of the modes, otherwise throw a fit
-        raise AssertionError("Unexpected value of OBSTYPE in " + fld["objid"])
+        # If none of these were given, we need to throw an error
+        raise AssertionError("Unexpected value of OBSTYPE in " +
+                             fldPar['objid'])
 
 
-def lunarDistance(fld, startTime, endTime):
-    """Calculate the distance to the moon at starttime and end time."""
-    # Position of the target cast into pyeEphem Angle
-    tarRa = pyEphem.hours(fld['ra'].values[0])
-    tarDec = pyEphem.degrees(fld['dec'].values[0])
+def parse_mask_position_angle(mask, runname):
 
-    # Moon Position
-    moonRa1, moonDec1 = MMTEphem.moonPosition(startTime)
-    moonRa2, moonDec2 = MMTEphem.moonPosition(endTime)
+    """Parse the .msk file for a mask to get it's position angle.
 
-    dist1 = angSep(moonRa1, moonDec1, tarRa, tarDec)
-    dist2 = angSep(moonRa2, moonDec2, tarRa, tarDec)
-
-    return (dist1+dist2)/2.0
-
-
-def moonUpDuringObs(startTime, endTime, mmt):
-    """Return a 0/1 if moon is down/up at any point during observation."""
-    # Is the moon up during the window?
-    obs = mmt.mmtObserver
-
-    # Do a check at startTime
-    obs.date = startTime
-    obs.horizon = "-0:34"
-    prevMoonSet = obs.previous_setting(pyEphem.Moon()).datetime()
-    prevMoonRise = obs.previous_rising(pyEphem.Moon()).datetime()
-
-    # By definition, startTime is between prev and next, so
-    # we need to check and see if the previous rise or set was most
-    # recent
-    if (prevMoonSet > prevMoonRise):
-        # This is darktime since the most recent event was the
-        # moon setting.
-        moonAtStart = False
-    else:
-        moonAtStart = True
-
-    # Do a check at endTime
-    obs.date = endTime
-    prevMoonSet = obs.previous_setting(pyEphem.Moon()).datetime()
-    prevMoonRise = obs.previous_rising(pyEphem.Moon()).datetime()
-
-    # Check again at end time.  Is the most recent event still
-    # the moon setting? If yes, the moon is still down.
-    if (prevMoonSet > prevMoonRise):
-        # This is darktime
-        moonAtEnd = False
-    else:
-        moonAtEnd = True
-
-    isMoonUp = (moonAtStart | moonAtEnd)  # Logical OR, only care if both are 0
-    return int(isMoonUp)
-
-
-def calcMoonFlag(fld, startTime, endTime, mmt):
-    """Calculate the IGNORE_FLAG based on lunar brightness and position.
-
-    Inputs:
-        fld -- field parameter entry from obsPars
-        startTime -- datetime formatted starting time
-        endTime -- datetime formatted ending time
-
-    Output:
-        flag -- 0/1 flag marking if the field is too close to the moon or
-                the moon is brighter than specified.
+    For the March 2016 run, the position angle was not written to the FLD
+    files for any mask observations. This makes checking the rotator limits
+    impossible. This code parses the .msk file to get the needed position
+    angle to add to the fldPar.
     """
-    moonUp = moonUpDuringObs(startTime, endTime, mmt)
-    moonAge = MMTEphem.moonAge(startTime)
+    # Read the mask file
+    maskfile = 'mmirs_catalogs/' + runname + '/' + mask + '.msk'
+    f = open(maskfile, 'r')
 
-    # Get the distance to the moon
-    moonDist = lunarDistance(fld, startTime, endTime)
-
-    # Now do brightness flag
-    moonReq = fld['moon'].values[0]
-    if (moonReq == 'bright') | (moonUp == 0):
-        # Anything works, either we were asked for bright
-        # time or the moon isn't up during
-        # the entirety of the observation
-        illumFlag = 1
-    elif (moonReq == 'grey') & (abs(moonAge) < 9) & (moonDist < 90):
-        # We were asked for grey time and it's grey time
-        illumFlag = 1
-    elif (moonReq == 'dark') & (abs(moonAge) < 4.5) & (moonDist > 90.0):
-        # We were asked for dark time and it's dark time
-        illumFlag = 1
-    else:
-        illumFlag = 0   # This isn't going to work here!
-
-    # Flag things that are just plain too close to the moon
-    if moonDist < 10:
-        illumFlag = 0
-
-    return illumFlag
-
-
-def willItFitWeight(fld, startTime, mmt, objEphem, donePar):
-    """Calculate a weight that measures the fraction of a field that fits.
-
-    Here, smaller weights are better, so we look at the fraction of the
-    observation that will *not* fit (so 0 means it fits, so it has a better
-    chance of being observed).
-
-    Inputs:
-        fld : single entry from the FLDpar DataFrame
-        startTime : datetime formatted time the observation window starts
-
-        mmt : MMTEphem information for the given night.
-
-    Outputs:
-        weight : weight from 0 to 1 with fraction of field not able to be
-                 observed
-        endTime : time this observation would finish. If not observable
-                  will return the starttime. If only partially observable
-                  will return the time at end of full visit.
-        nVisits : the number of visits observed.
-    """
-
-    # Throw an error if there are more than one
-    if len(fld) > 1:
-        raise AssertionError("There are more than 1 fields with name " +
-                             fld['objid'])
-
-    # First, get the end of the night time
-    nightEnd = mmt.morningTwilight
-    timeRemaining = (nightEnd - startTime).total_seconds()  # In seconds
-
-    # Is the target observable at the StartTime?
-    if isObservable(objEphem, startTime, fld) == 0:
-        return 0.0, startTime, 0
-
-    # This loop may be specific for MMIRS as BINOSPEC
-    # may not have the nvisit/nexposure definitionss
-
-    # Exposure time is stored in minutes
-    exptime = float(fld['exptime'].values[0]) * 60.0
-    repeats = float(fld['repeats'].values[0]) - \
-        float(donePar['doneVisit'].values[0])
-    nexp = float(fld['nexp'].values[0])
-
-    # Calculate the number of visits that fit (keep it whole)
-    # We don't want to worry about partial visits
-    expPerVisit = exptime * nexp
-    possVisits = math.floor((timeRemaining - mmirsOverhead(fld)) / expPerVisit)
-
-    if possVisits > repeats:
-
-        totalTargetTime = expPerVisit*repeats + mmirsOverhead(fld)
-        tdelta = datetime.timedelta(seconds=totalTargetTime)
-
-        # Now, let's see if the target is still observable at the end of
-        # the block
-        endTime = startTime + tdelta
-        if isObservable(objEphem, endTime, fld) == 1:
-            return 1.0, endTime, repeats
-        else:
-            possVisits = repeats
-
-    # Ok, we couldn't fit all the observations in. Let's figure out
-    # how much we can
-    nVisitsObservable = possVisits
-
-    while nVisitsObservable >= 1:
-        totalTargetTime = expPerVisit*nVisitsObservable + mmirsOverhead(fld)
-        tdelta = datetime.timedelta(seconds=totalTargetTime)
-        endTime = startTime + tdelta
-
-        # Check to see if it's observable at the end of the window
-        if isObservable(objEphem, endTime, fld) == 1:
-            return 1.0 * nVisitsObservable/repeats, endTime, nVisitsObservable
-        else:
-            nVisitsObservable -= 1
-
-    # If we get here, the object is never observable, return bad weight
-    return 0, startTime, 0
-
-
-def obsUpdateRow(fldPar, donePar, startTime, mmt, prevPos=None):
-    """Calculate observing weight for given observation.
-
-    Input:
-        fldpar : DataFrame for a single observation. Comes from
-                 readAllFLDFiles (i.e. not a single dictionary)
-        donepar : Dataframe with stats pertaining to a fields doneness
-        starTime : datetime string for beginning time for observation
-
-    """
-    # The idea here is to loop through all of the fields and calculate
-    # the weight for this startTime.
-    weightList = []  # Will store array of dicts with weight info
-
-    for objID in fldPar["objid"]:
-        # Is this already observed?
-        donefld = donePar[donePar['objid'] == objID]
-        fld = fldPar[fldPar["objid"] == objID]
-
-        if donefld['complete'].values[0] == 1:
-            continue
-
-        # Initialize the weight dictionary
-        obsWeight = {}
-        obsWeight['objid'] = objID
-
-        objEphem = MMTEphem.ObjEphem(fld['ra'].values[0],
-                                     fld['dec'].values[0],
-                                     startTime, mmt)
-        fitWeight, endTime, fitVisits = willItFitWeight(fld,
-                                                        startTime, mmt,
-                                                        objEphem,
-                                                        donefld)
-        moonFlag = calcMoonFlag(fld, startTime, endTime, mmt)
-
-        # Does this observation have one very close by
-        dist_weight = 1
-        if prevPos is not None:
-
-            dist = angSep(hms2dec(fld['ra'].values[0])*15.0,
-                          hms2dec(fld['dec'].values[0]),
-                          prevPos[0], prevPos[1])
-            if dist < 10./3600.:
-                dist_weight = 1000
-
-        obsWeight['fitWeight'] = fitWeight
-        obsWeight['obsTime'] = (endTime-startTime).total_seconds()
-        obsWeight['moonFlag'] = moonFlag
-        obsWeight['nVisits'] = fitVisits
-        obsWeight['ra'] = fld['ra'].values[0]
-        obsWeight['dec'] = fld['dec'].values[0]
-
-        # Priority Weight
-        priorFlag = 1.0/float(fld['priority'])**3
-
-        # Now combine the weights
-        weightTAC = 1.0 - 1.0 * donefld['doneTime'].values[0] \
-            / donefld['totalTime'].values[0]
-        if weightTAC < 0:
-            weightTAC = 0.001
-        totalWeight = fitWeight * moonFlag * \
-            (weightTAC) *dist_weight*priorFlag
-        # We need to account for a few extra things.
-        # 1. I want fields that have had previously observed
-        #    fields to be the top priority if they are observable.
-        # This modification will weight fields with no observations
-        # at one (1+0) and those partially observed at 10
-        partCompWeight = int(donefld['doneVisit'].values[0] > 0)
-        #totalWeight = totalWeight * (1+0.5*partCompWeight)
-
-        # Now account for weighting from preivous iteration of the
-        # code. This should smooth things out
-        totalWeight = totalWeight / donefld['prevWeight'].values[0]
-        obsWeight['totalWeight'] = totalWeight
-        # Append to weight listing
-        weightList.append(obsWeight)
-
-    obsWeights = pd.DataFrame(weightList)
-
-    # Doing the O(n) problem here
-    hasMax = []
-
-    # Check to see there are actually targets!
-    if len(obsWeights) == 0:
-        return None, None
-
-    maxWeight = max(obsWeights['totalWeight'])
-    for ii in range(len(obsWeights)):
-        if obsWeights['totalWeight'].values[ii] == maxWeight:
-            hasMax.append(ii)
-
-    # Now, check there are some with non-zero weight and
-    # Observe a random one
-    if maxWeight == 0:
-        # No targets were done.
-        return None, None
-    else:
-
-        # This allows for random choice.
-        randIndex = hasMax[randint(0, len(hasMax)-1)]
-
-        diffTime = obsWeights['obsTime'].values[randIndex]
-        # Increment the schedule
-        schedule = []
-        schedule.append(startTime)
-        schedule.append(diffTime)
-        schedule.append(obsWeights['objid'].values[randIndex])
-        schedule.append(obsWeights['nVisits'].values[randIndex])
-        outPos = [hms2dec(obsWeights['ra'].values[randIndex])*15.0,
-                  hms2dec(obsWeights['dec'].values[randIndex])]
-
-
-        # Update the done masks
-        index = [i for i, x in enumerate(donePar['objid'] ==
-                                         schedule[2]) if x]
-
-        # Donetime tracks total time for this PI.  We weight by
-        # this, so let's increment all entries in donefld
-
-        PI = donePar.loc[index, 'PI'].values[0]
-        for ii in range(len(fldPar)):
-            if donePar["PI"].values[ii] == PI:
-                donePar.loc[ii, 'doneTime'] += diffTime/3600.
-                donePar.loc[ii, 'currentWeight'] = \
-                    donePar.loc[ii, 'doneTime'] / \
-                    donePar.loc[ii, 'totalTime']
-
-        donePar.loc[index, 'doneVisit'] += \
-            obsWeights['nVisits'].values[randIndex]
-
-        # Check to see if the target is now done
-        requested = int(fldPar[fldPar['objid'] ==
-                               schedule[2]]["repeats"].values[0])
-        if int(donePar.loc[index, 'doneVisit']) >= requested:
-            donePar.loc[index, 'complete'] = 1
-        return schedule, outPos
-
-
-def obsOneNight(fldPar, donePar, date):
-    """Fully Schedules one night."""
-    # Get the ephemeris for the night
-    mmt = MMTEphem.ephem(date)
-    startTime = mmt.eveningTwilight
-
-    # Now, start at twilight and add observervations. Each
-    # time increment currentTime by the observation time
-    # If no observations are found, add 5 minutes and check again
-    currentTime = startTime
-    schedule = []  # Will contain scheduled fields
-    allDone = False
-    prevPos = None
-    while (currentTime < mmt.morningTwilight) & (allDone is False):
-        newSched, prevPos = obsUpdateRow(fldPar, donePar,
-                                        currentTime, mmt, prevPos)
-        # Check to see if something was observed
-        if newSched is None:
-            # Increment time and continue
-            currentTime += datetime.timedelta(minutes=20)
-        else:
-            # Append new entry to schedule, increment currentTime
-            # by exposure time.
-            schedule.append(newSched)
-            currentTime += datetime.timedelta(seconds=newSched[1])
-            completed = donePar['complete'].values
-            if min(completed) == 1:
-                allDone = True
-
-    return schedule
-
-
-def main(args):
-    """Main module where the bulk of the work is completed."""
-    # Get all of the observations for this dataset
-    if len(args) > 1:
-        trimester = args[1]
-    else:
-        trimester = None  # The default is handled in queueTools
-    obsPars = queueTools.readAllFLDfiles(trimester)
-
-    # Create the blank done file if it doesn't exist
-    donePar = queueTools.createBlankDoneMask(obsPars)
-
-    donefile = 'donefile.dat'
-    if os.path.isfile(donefile):
-        # Read in the existing file
-        f = open(donefile)
-        for line in f.readlines():
-            if line[0] != "#" and line.strip() != '':
-		
-                split = line.strip().split()
-                id = split[0]
-                pi = split[1]
-                visits = float(split[2])
-                donetime = float(split[3])
-                completed = int(split[4])
-
-                if max(donePar['objid'] == id) is "False":
-                    raise Exception("No Match found for %s" % id)
-                if donePar.loc[donePar['objid'] == id, 'doneVisit'].max() > 0:
-                    raise Exception("Field %s is listed multiple times in donefile" % id)
-		
-                donePar.loc[donePar['objid'] == id, 'doneVisit'] = visits
-                donePar.loc[donePar['PI'] == pi, 'doneTime'] += donetime
-                donePar.loc[donePar['objid'] == id, 'complete'] = completed
-
-    origDonePar = donePar.copy()
-    # Run one call of obsUpdateRow as a test
-    date_file = "fitdates.dat"
-    f = open(date_file, 'r')
-    allDates = []
+    # Check each line in the maskfile and find the line that starts with 'pa'
+    mask_position_angle = False
     for line in f.readlines():
-        if line[0] != '#':
-            allDates.append(line.strip())
-
-    finishedFlag = False
-    for iter in range(5):
-
-        # Check to see if I reached a success mark
-        if finishedFlag is True:
-            continue
-
-        print("")
-        print("**** ITERATION # %i ********" % (iter+1))
-        fullSched = []
-        for date in allDates:
-            sys.stdout.write("\r Working on Date %s   " % date)
-            schedule = obsOneNight(obsPars, donePar, date)
-            for line in schedule:
-                fullSched.append(line)
-
-        # Now, fill in previous weights and zero out entries in a
-        # new donePar
-        newDone = donePar.copy()
-
-        newDone.loc[:, 'complete'] = origDonePar['complete']
-        newDone.loc[:, 'doneTime'] = origDonePar['doneTime']
-        newDone.loc[:, 'doneVisit'] = origDonePar['doneVisit']
-        
-
-        # Make a list of PIS and see if they got all the fields they
-        # asked for.
-        allDone = {}
-        for ii in range(len(newDone)):
-            PI = newDone["PI"].values[ii]
-            if PI not in allDone:
-                completed = donePar[donePar['PI'] == PI]['complete'].values
-                if min(completed) == 1:
-                    allDone[PI] = True
-                else:
-                    allDone[PI] = False
-            weightMod = int(allDone[PI])
-            newDone.loc[ii, 'prevWeight'] = \
-                donePar.loc[ii, 'currentWeight']*(1-weightMod*0.9)
-
-        if min(allDone.values()) == 1:
-            # We've scheduled everything, stop iterating
-            finishedFlag = True
-        newDone.loc[:, 'currentWeight'] = 0.0
-        pprint(donePar)
-        if iter != 5:
-            donePar = newDone
-
-    # Format the schedule for output
-    f = open('schedule.dat', 'w')
-    for sched in fullSched:
-        startTime = sched[0]
-        duration = sched[1]
-        field = sched[2]
-        nVisit = sched[3]
-
-        FORMAT = "%Y/%m/%d %H:%M:%S"
-        outStart = startTime.strftime(FORMAT)
-        endTime = startTime + datetime.timedelta(seconds=duration)
-        outEnd = endTime.strftime(FORMAT)
-        f.write("%s %s %s %s\n" % (outStart, outEnd, field, nVisit))
-
+        sline = line.strip().split()
+        if len(sline) > 1 and sline[0] == 'pa':
+            mask_position_angle = float(sline[1])
     f.close()
 
+    return mask_position_angle
+
+
+def read_allocated_time(runname):
+    """Read the allocated time input file for the given run.
+
+    Inputs:
+        runname : name given to dates belonging to one run. If multiple runs
+            are being summed to give one queue session, we all should have the
+            same runname.  This means we could separate by trimester (but
+            can also do finer divisions if needed).
+    """
+    # TODO: Document how to updated the allocated_time file
+    filename = "AllocatedTime.dat"
+    f = open(filename, 'r')
+
+    # Initialize the dictionary to hold this time
+    allocated_time = {}
+    for line in f.readlines():
+        if line[0] == '#':
+            # Comment line, so skip
+            continue
+
+        date, PI, runID = line.strip().split()
+
+        # The run for this night doesn't match the specified run, so skip
+        if runID != runname:
+            continue
+
+        mmt = MMT()
+        date = pyEphem.date(date).datetime()
+
+        # Calculate the night length and covert to hours
+        night_length = mmt.morning_twilight(date) - mmt.evening_twilight(date)
+        night_length = night_length.total_seconds() / 3600.
+
+        # Update the allocated time dictionary
+        if PI in allocated_time:
+            allocated_time[PI] += night_length
+        else:
+            allocated_time[PI] = night_length
+
+    f.close()
+    return allocated_time
+
+
+def read_single_fld_file(filename, runname):
+    """Read a FLD file and return a dictionary with the contained data."""
+    # Initialize the output dictionary
+    obspars = {}
+
+    f = open(filename, 'r')
+    # Get the PI:
+    _, PI_name = f.readline().strip().split()
+    obspars['PI'] = PI_name
+
+    # Get the program ID
+    _, prog_ID = f.readline().strip().split()
+    obspars['progID'] = prog_ID
+
+    # Add the filename for bookkeeping
+    obspars['fldfile'] = filename
+
+    # Parse the remaining column names
+    keywords = f.readline().strip().split()
+    f.readline()  # Remove the line of "------"
+    values = f.readline().strip().split()
+
+    # Fill the dictionary
+    for key, val in zip(keywords, values):
+        obspars[key] = val
+
+    # Fill in the position angle if this is a mask
+    if obspars['obstype'] == 'mask':
+        obspars['pa'] = parse_mask_position_angle(
+            obspars['mask'], runname)
+    f.close()
+
+    # Include the object for target
+    obspars['ephem'] = Target(obspars['ra'], obspars['dec'],
+                              obspars['pa'])
+    return obspars
+
+
+def read_all_fld_files(runname):
+    """Read all of the fld files for a run and output a dataframe."""
+
+    # Set the path
+    path = 'mmirs_catalogs/' + runname
+
+    # Get the list of files that end in .fld in the specified path
+    filelist = []
+    for (dirpath, dirnames, filenames) in walk(path):
+        filelist.extend([dirpath+'/' + f
+                         for f in filenames if f[-4:] == '.fld'])
+
+    # Create a list of each of the dictionaries from the individual files
+    fld_list = []
+    for file in filelist:
+        fld = read_single_fld_file(file, runname)
+        fld_list.append(fld)
+
+    # Convert the list to a dataframe and output
+    return pd.DataFrame(fld_list)
+
+
+def create_blank_done_mask(obspars, runname):
+    """Create a blank structure to hold information about progress on fields.
+
+    I'm not a big fan of this format. So this could change.
+
+    Inputs:
+        obspars: dataframe containing each of the requested observations
+                 for this run
+        runname: signifier for the given run
+                 Used when determining allocated time
+    """
+    # Read the allocated time
+    allocated_time = read_allocated_time(runname)
+
+    # Create the blank format
+    blank_dict = {}
+    blank_dict['complete'] = 0
+    blank_dict['done_visits'] = 0
+    blank_dict['allocated_time'] = 0.0
+    blank_dict['time_for_PI'] = 0.0
+    blank_dict['previous_weight'] = 1.0
+    blank_dict['current_weight'] = 0.0
+    blank_dict['PI'] = ''
+    blank_dict['objid'] = ''
+
+    dict_list = []
+    for ii in range(len(obspars)):
+        copy_dict = blank_dict.copy()
+        copy_dict['objid'] = obspars.loc[ii, 'objid']
+        copy_dict['PI'] = obspars.loc[ii, "PI"]
+        if copy_dict['PI'] in allocated_time:
+            copy_dict['allocated_time'] = allocated_time[copy_dict['PI']]
+        else:
+            # To avoid divide by zero errors, set anyone without
+            # allocated time to 1/1000 of an hour.
+            copy_dict['allocated_time'] = 0.001
+        dict_list.append(copy_dict)
+
+    return pd.DataFrame(dict_list)
+
+
+class Target:
+
+    """Define the Target class."""
+
+    def __init__(self, ra, dec, position_angle):
+        """Intialize the target object."""
+
+        self.ra = ra
+        self.dec = dec
+        self.position_angle = position_angle
+        self.ephem = pyEphem.FixedBody()
+        self.ephem._ra = self.ra
+        self.ephem._dec = self.dec
+        self.ephem._epoch = pyEphem.J2000
+        self.MMT = MMT()
+
+    def isObservable(self, timestamp):
+        """Is the target observable at the given datetime."""
+
+        # Check the airmass. Checking for < 1.0 is for numerical issues
+        airmass_cutoff = 1.8
+        airmass = self.airmass(timestamp)  # Using it twice, only calc once
+        if (airmass < 1.0) or (airmass > airmass_cutoff):
+            return 0
+
+        # Check the rotator limit
+        rotator_limits = [-180, 164]
+        rotAngle = self.rotator_angle(timestamp)
+        if rotAngle < rotator_limits[0] or \
+           rotAngle > rotator_limits[1]:
+            return 0
+
+        return 1
+
+    def AltAz(self, timestamp):
+        """Calculate the Alt/Az position of a target.
+
+        Inputs:
+            ra : Right Ascension
+            dec : Declination
+            timestamp : timestamp timestamp
+            observatory : pyEphem.Observer object
+        """
+        self.MMT.MMTEphem.date = timestamp
+        self.ephem.compute(self.MMT.MMTEphem)
+
+        # Return the alt and az calculated
+        return self.ephem.alt * 180.0 / np.pi, \
+            self.ephem.az * 180 / np.pi
+
+    def airmass(self, timestamp):
+        """Given a targets position and time, calculate the airmass."""
+
+        # Calculate the alt az
+        alt, az = self.AltAz(timestamp, self.MMT.MMTEphem)
+        zenith_angle = 90.0 - alt
+        za_radians = zenith_angle / 180.0 * np.pi
+        return 1.0 / np.cos(za_radians)
+
+    def parallactic_angle(self, timestamp):
+        """Calculate the parallactic angle at a given observation time."""
+        self.MMT.MMTEphem.date = timestamp
+        self.ephem.compute(self.MMT.MMTEphem)
+        return self.ephem.parallactic_angle()
+
+    def rotator_angle(self, timestamp):
+        """Calculate the rotator angle needed for the PA and time."""
+        parAngle = self.parallactic_angle(timestamp) * 180.0 / np.pi
+        rotAngle = parAngle - self.position_angle
+
+        # Account for the fact that 355 and -5 are the same angle
+        if rotAngle < -180:
+            rotAngle += 360.0
+
+        return rotAngle
+
+    def separation(self, Target):
+        """Calculate the distance between this target and another"""
+        return AngSep(self.ra, self.dec, Target.ra, Target.dec)
+
+    def lunar_distance(self, timestamp):
+        """Calculate the distance to the moon."""
+        moon_ra, moon_dec = self.MMT.moonPosition(timestamp)
+        return AngSep(self.ra, self.dec, moon_ra, moon_dec)
+
+
+class MMT:
+    """Define an object to hold details about the MMT."""
+
+    def __init__(self):
+        """Initialize the MMT object."""
+        self.MMTEphem = pyEphem.Observer()
+        self.MMTEphem.pressure = 0
+        self.MMTEphem.lat = "31:41:19.6"
+        self.MMTEphem.lon = "-110:53:04.4"
+        self.MMTEphem.elevation = 2600
+
+        # This holds the definition of twilight
+        self.twilight_horizon = "-12"
+        self.MMTEphem.horizon = self.twilight_horizon
+
+    def moon_age(self, timestamp):
+        """Return the age of the moon at the given time."""
+        d1 = pyEphem.next_new_moon(timestamp).datetime()
+        d2 = pyEphem.previous_new_moon(timestamp).datetime()
+
+        # Check format of provided time. If it wasn't a timestamp, make it one.
+        if isinstance(timestamp, datetime.datetime) is False:
+            timestamp = timestamp.datetime()
+
+        # Find the total time since new moon and then convert to days
+        if (d1 - timestamp) < (timestamp - d2):
+            return (timestamp - d1).total_seconds() / 3600. / 24.
+        else:
+            return (timestamp - d2).total_seconds() / 3600. / 24.
+
+    def moonPosition(self, timestamp):
+        """Return the position of the moon at the given time."""
+        # Construct the lunar ephemeris and find ra an dec given time
+        j = pyEphem.Moon()
+        j.compute(timestamp)
+        return j.ra, j.dec
+
+    def string_timestamp_to_noonMST(self, timestamp):
+        """Convert a string timestamp to reference noon MST"""
+        return timestamp.split()[0] + ' 19:00'
+
+    def evening_twilight(self, timestamp):
+        """Calculate the next evening twilight."""
+        # Check type of timestamp
+        if type(timestamp) == str:
+            timestamp = self.string_timestamp_to_noonMST(timestamp)
+
+        # Set the calculation to the specified date
+        self.MMTEphem.date = timestamp
+        return self.MMTEphem.next_setting(pyEphem.Sun()).datetime()
+
+    def morning_twilight(self, timestamp):
+        """Calculate the next morning twilight."""
+        # Check the type of timestamp
+        if type(timestamp) == str:
+            timestamp = self.string_timestamp_to_noonMST(timestamp)
+
+        # Set the calculation to be done at the specified date
+        self.MMTEphem.date = timestamp
+        return self.MMTEphem.next_rising(pyEphem.Sun()).datetime()
+
+    def is_moon_up(self, timestamp):
+        """Calculate if the moon is up at the given timestamp."""
+
+        # Calculate the last and next moonrise at this time.
+        self.MMTEphem.date = timestamp
+        self.MMTEphem.horizon = '-0:34'
+        prev_moonset = self.MMTEphem.previous_setting(pyEphem.Moon())
+        prev_moonset = prev_moonset.datetime()
+        prev_moonrise = self.MMTEphem.previous_rising(pyEphem.Moon())
+        prev_moonrise = prev_moonrise.datetime()
+        self.MMTEphem.horizon = self.twilight_horizon  # Restore default
+
+        if prev_moonset > prev_moonrise:
+            return 0
+        else:
+            return 1
+
+
 if __name__ == "__main__":
-    main(sys.argv)
+    filename = 'mmirs_catalogs/2016a/UAO-S143-DStark/UAO-S143_gdnel31_J.fld'
+    runname = '2016a'
+    fldpar = read_all_fld_files('2016a')
+    print(fldpar.head())
