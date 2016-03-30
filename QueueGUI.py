@@ -93,6 +93,8 @@ class QueueGUI():
         # Middle frame
         self.midFrame = tkinter.Frame(self.root)
         self.midFrame.grid(row=1, column=1, columnspan=99, rowspan=99)
+        self.fig = None
+
 
     def build_drop_down_menu(self):
         """Create Drop Down Menu and submenus."""
@@ -149,10 +151,6 @@ class QueueGUI():
 
     def read_schedulefile(self):
 
-        # Read in the colormap
-        colormap = tableau_colormap.tableau20(raw=True)
-        color = [tuple_to_hex(colormap[x % len(colormap)])
-                 for x in range(len(self.fldPar))]
 
         schedulefile = 'schedule.dat'
         f = open(schedulefile, 'r')
@@ -190,13 +188,14 @@ class QueueGUI():
         dates = [(strings2datetime(x, '00:00:00')-mindate).days
                  for x in dates]
 
+        artist = []
+
         for ii, date in enumerate(dates):
-            rects.append(mpatches.Rectangle(
-                (dates[ii]-0.5, startTime[ii]), 1.0, duration[ii],
-                facecolor=color[ii],
-                edgecolor='none',
-                picker=True
-            ))
+            rectval = [dates[ii]-0.5, startTime[ii], 1.0, duration[ii]]
+            rects.append(rectval)
+            artist.append(
+                (rectval[0], rectval[1])
+            )
 
         # Create a dataframe
         self.sched_frame = pd.DataFrame({'fieldID': field,
@@ -205,18 +204,25 @@ class QueueGUI():
                                          'endTime': endTime,
                                          'date': dates,
                                          'rect': rects,
+                                         'artist': artist,
                                          'duration': duration,
                                          'nvisit_sched': nvisit_scheduled})
 
     def click_schedule_block(self, event):
-        artist = event.artist
-        field = self.sched_frame[self.sched_frame['rect'] ==
-                                 artist]['fieldID'].values[0]
-        print(field)
+        # Only do this on down click
+        if event.mouseevent.button == 1:
+            artist = event.artist
+            artist.set_visible(False)
+            self.plot_schedule(selected_artist=artist.xy)
 
     def read_field_information(self, trimester=None):
         """Read in all the FLD files."""
         self.fldPar = queueTools.readAllFLDfiles(trimester)
+        # Read in the colormap
+        colormap = tableau_colormap.tableau20(raw=True)
+        color = [tuple_to_hex(colormap[x % len(colormap)])
+                 for x in range(len(self.fldPar))]
+        self.fldPar['color'] = color
 
     def plot_schedule(self, selected_artist=None):
         """Update the plotted schedule.
@@ -225,29 +231,50 @@ class QueueGUI():
         set if an item is clicked which will mark it
         (and more later).
         """
-
-        f = pltfig.Figure(figsize=(5, 4))
-        a = f.add_subplot(111)
-
-        # Create the canvas
-        canvas = tkagg.FigureCanvasTkAgg(f, master=self.midFrame)
-        canvas.show()
-        canvas.get_tk_widget().pack()
-        f.canvas.mpl_connect('pick_event', self.click_schedule_block)
-
+        if self.fig is None:
+            self.fig = pltfig.Figure(figsize=(5, 4))
+            self.ax = self.fig.add_subplot(111)
+            # Create the canvas
+            self.canvas = tkagg.FigureCanvasTkAgg(self.fig,
+                                                  master=self.midFrame)
+            self.canvas.show()
+            self.canvas.get_tk_widget().pack()
+            self.fig.canvas.mpl_connect('pick_event',
+                                        self.click_schedule_block)
         # Set the font for labels
         matplotlib.rcParams.update({'font.size': 6})
 
         # Plot each of the rects
         for ii in range(len(self.sched_frame)):
-            rect = self.sched_frame.loc[ii, 'rect']
-            a.add_artist(rect)
-            a.draw_artist(rect)
-            a.text(self.sched_frame.loc[ii, 'date'],
-                   self.sched_frame.loc[ii, 'startTime'] +
-                   0.5*self.sched_frame.loc[ii, 'duration'],
-                   self.sched_frame.loc[ii, 'fieldID'],
-                   va='center', ha='center')
+
+            rectval = self.sched_frame.loc[ii, 'rect']
+            edgecolor = 'none'
+            fldMatch = self.fldPar[self.fldPar['objid'] ==
+                                   self.sched_frame.loc[ii, 'objid']]
+            colorval = fldMatch['color'].values[0]
+            if (selected_artist is not None):
+                artist = self.sched_frame.loc[ii, 'artist']
+                if ((selected_artist[0] == artist[0]) and
+                    (abs(selected_artist[1]-artist[1]) == 0)):
+                    edgecolor = 'black'
+
+            rect = mpatches.Rectangle(
+                (rectval[0], rectval[1]), rectval[2], rectval[3],
+                edgecolor=edgecolor,
+                facecolor=colorval,
+                picker=True,
+                linewidth=10,
+                alpha=0.1
+            )
+
+
+            self.ax.add_artist(rect)
+            self.ax.draw_artist(rect)
+            self.ax.text(self.sched_frame.loc[ii, 'date'],
+                         self.sched_frame.loc[ii, 'startTime'] +
+                         0.5*self.sched_frame.loc[ii, 'duration'],
+                         self.sched_frame.loc[ii, 'fieldID'],
+                         va='center', ha='center')
         plot_limits = self.plot_limits.copy()
 
         # Set y limits
@@ -262,8 +289,8 @@ class QueueGUI():
         if plot_limits[1] is None:
             plot_limits[1] = self.sched_frame['date'].max()+0.6
 
-        a.set_xlim(plot_limits[0:2])
-        a.set_ylim(plot_limits[2:4])
+        self.ax.set_xlim(plot_limits[0:2])
+        self.ax.set_ylim(plot_limits[2:4])
 
 def main():
     """Code that is run on startup. Create the GUI and go."""
