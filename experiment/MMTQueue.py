@@ -15,6 +15,7 @@ import pandas as pd
 import os
 import sys
 from random import randint
+import time
 
 
 def hms2dec(string):
@@ -255,7 +256,7 @@ def create_blank_done_mask(obspars, runname):
     return pd.DataFrame(dict_list)
 
 
-def moon_flag(fldpar, start_time, end_time):
+def moon_flag(fldpar, start_time, end_time, moon_up_time, moon_up_array):
     """Calculate a flag for a given field based on the lunar conditions.
 
     Inputs:
@@ -266,17 +267,29 @@ def moon_flag(fldpar, start_time, end_time):
         0/1 flag marking if the field suffers from any lunar issues.
     """
     # Parse the target ephemeris to get lunar position and age
-    moon_up_at_start = fldpar.iloc[0]['ephem'].MMT.is_moon_up(start_time)
-    moon_up_at_end = fldpar.iloc[0]['ephem'].MMT.is_moon_up(end_time)
+    # moon_up_at_start = fldpar.iloc[0]['ephem'].MMT.is_moon_up(start_time)
+    # moon_up_at_end = fldpar.iloc[0]['ephem'].MMT.is_moon_up(end_time)
+    mintime_to_start = min([abs(x - start_time) for x in moon_up_time])
+    mintime_to_end = min([abs(x - end_time) for x in moon_up_time])
+
+    for ii, itime in enumerate(moon_up_time):
+        if abs(itime-start_time) == mintime_to_start:
+            moon_up_at_start = moon_up_array[ii]
+        if abs(itime-end_time) == mintime_to_end:
+            moon_up_at_end = moon_up_array[ii]
+
     # This is set if either start or end is set
     moon_up = max(moon_up_at_end, moon_up_at_start)
+
+    agestart = time.time()
     moon_age = fldpar.iloc[0]['ephem'].MMT.moon_age(start_time)
     lunar_distance = fldpar.iloc[0]['ephem'].lunar_distance(start_time)
+
 
     moon_requirement = fldpar.iloc[0]['moon']
 
     # Check the brightness compared to requirement
-    if moon_requirement == 'bright' and moon_up == 0:
+    if moon_requirement == 'bright' or moon_up == 0:
         # Either the moon is down or bright was requested, so we're good
         illum_flag = 1
     elif (moon_requirement == 'grey') and \
@@ -293,6 +306,8 @@ def moon_flag(fldpar, start_time, end_time):
     # Finally, check to be sure we aren't just plain too close
     if lunar_distance < 10:
         illum_flag = 0
+
+
     return illum_flag
 
 
@@ -388,53 +403,61 @@ def calc_same_target_flag(fldpar, prev_target):
         return 1.0
 
 
-def calc_field_weights(obspar, donepar, start_time, prev_target=None):
+def calc_single_weight(fldpar, obj_donepar, start_time,
+                       moon_up_time, moon_up_array, prev_target=None):
+    """Calcualte the weight for a single object."""
+    # Intialize a dictionary to hold our weights
+    obs_weight = {}
+    obs_weight['objid'] = fldpar.iloc[0]['objid']
+
+    # Determine if this field fits
+    fit_weight, end_time, obs_visits = \
+        does_field_fit(fldpar, start_time, obj_donepar)
+
+    # Check the moon conditions
+    moon_weight = moon_flag(fldpar, start_time, end_time, moon_up_time,
+                            moon_up_array)
+
+    # Check to see if the previous target we looked at was in this field
+    if prev_target is not None:
+        dist_weight = calc_same_target_flag(prev_target)
+    else:
+        dist_weight = 1.0
+
+    obs_weight['duration'] = (end_time-start_time).total_seconds()
+    obs_weight['n_visits_scheduled'] = obs_visits
+    obs_weight['target'] = fldpar.iloc[0]['ephem']
+
+    # TODO : Implement priority scheduling both between programs and in PI
+    # Calculate the TAC weight
+    tac_weight = 1.0 * obj_donepar.iloc[0]['time_for_PI'] / \
+        obj_donepar.iloc[0]['allocated_time']
+    # Don't allow this to be exactly zero (divide by zero errors)
+    if tac_weight <= 0:
+        tac_weight = 1e-5
+
+    # Extract the previlous weight
+    prev_weight = obj_donepar.iloc[0]['previous_weight']
+
+    # Calculate the final weight
+    total_weight = dist_weight / tac_weight / prev_weight * \
+        fit_weight * moon_weight
+    obs_weight['total_weight'] = total_weight
+
+
+
+    return obs_weight
+
+
+def calc_field_weights(obspar, donepar, start_time, moon_up_time, moon_up_array,
+                       prev_target=None):
     """Determine the weight for every object at this start time.
 
     Using this weight we will select the best target to observe here
     """
     # Loop through all of the fields and calculate a weight
     weight_list = []
-
-    def calc_single_weight(fldpar, obj_donepar, start_time, prev_target=None):
-        # Intialize a dictionary to hold our weights
-        obs_weight = {}
-        obs_weight['objid'] = objID
-
-        # Determine if this field fits
-        fit_weight, end_time, obs_visits = \
-            does_field_fit(fldpar, start_time, obj_donepar)
-
-        # Check the moon conditions
-        moon_weight = moon_flag(fldpar, start_time, end_time)
-
-        # Check to see if the previous target we looked at was in this field
-        if prev_target is not None:
-            dist_weight = calc_same_target_flag(prev_target)
-        else:
-            dist_weight = 1.0
-
-        obs_weight['duration'] = (end_time-start_time).total_seconds()
-        obs_weight['n_visits_scheduled'] = obs_visits
-        obs_weight['target'] = fldpar.iloc[0]['ephem']
-
-        # TODO : Implement priority scheduling both between programs and in PI
-        # Calculate the TAC weight
-        tac_weight = 1.0 * obj_donepar.iloc[0]['time_for_PI'] / \
-            obj_donepar.iloc[0]['allocated_time']
-        # Don't allow this to be exactly zero (divide by zero errors)
-        if tac_weight <= 0:
-            tac_weight = 1e-5
-
-        # Extract the previlous weight
-        prev_weight = obj_donepar.iloc[0]['previous_weight']
-
-        # Calculate the final weight
-        total_weight = dist_weight / tac_weight / prev_weight * \
-            fit_weight * moon_weight
-        obs_weight['total_weight'] = total_weight
-
-        return obs_weight
+    append = weight_list.append
 
     for objID in obspar['objid']:
 
@@ -446,18 +469,20 @@ def calc_field_weights(obspar, donepar, start_time, prev_target=None):
             continue
 
         obs_weight = calc_single_weight(fldpar, obj_donepar,
-                                        start_time, prev_target=prev_target)
-
-        weight_list.append(obs_weight)
+                                        start_time, moon_up_time, moon_up_array,
+                                        prev_target=prev_target)
+        append(obs_weight)
 
     return pd.DataFrame(weight_list)
 
 
-def UpdateRow(obspar, donepar, start_time, prev_target=None):
+def UpdateRow(obspar, donepar, start_time, moon_up_time, moon_up,
+              prev_target=None):
     """Coordinate the weight calculation and target selection."""
 
     obs_weight = calc_field_weights(obspar, donepar,
-                                    start_time, prev_target=prev_target)
+                                    start_time, moon_up_time, moon_up,
+                                    prev_target=prev_target)
 
     # Find were the weight is the maximum
 
@@ -516,9 +541,17 @@ def obsOneNight(obspar, donepar, date):
     # Start at twilight and add observations. Each time, increment the
     # current time by the previous duration. If nothing add 20 minutes and try
     # again.
-    current_time = mmt.evening_twilight(date)
-    schedule = []
 
+    # Cache if the moon is up
+    current_time = mmt.evening_twilight(date)
+    tdelta = datetime.timedelta(minutes=20)
+    time_array = [current_time]
+    moon_up = [mmt.is_moon_up(current_time)]
+    while (time_array[-1] < mmt.morning_twilight(date)):
+        time_array.append(time_array[-1] + tdelta)
+        moon_up.append(mmt.is_moon_up(time_array[-1]))
+
+    schedule = []
     # Set some flags
     all_done = False
     prev_target = None
@@ -526,7 +559,8 @@ def obsOneNight(obspar, donepar, date):
     while (current_time < mmt.morning_twilight(date)) and (all_done is False):
 
         new_sched, new_target = \
-            UpdateRow(obspar, donepar, current_time, prev_target=prev_target)
+            UpdateRow(obspar, donepar, current_time, time_array, moon_up,
+                      prev_target=prev_target)
 
         # Was anything observed?
         if new_sched is None:
@@ -540,11 +574,13 @@ def obsOneNight(obspar, donepar, date):
                 all_done = True
     return schedule
 
-def obsAllNights(obspar, donepar, all_dates):
+
+def obsAllNights(obspar, donepar, all_dates, iter_number):
     """Iterate through nights and schedule."""
     full_schedule = []
     for date in all_dates:
-        sys.stdout.write("\r Working on Date %s" % date)
+        sys.stdout.write("\r Working on Date %s of iteration %d" %
+                         (date, iter_number))
         schedule = obsOneNight(obspar, donepar, date)
         for line in schedule:
             full_schedule.append(line)
@@ -620,10 +656,10 @@ def main(args):
 
     # Iterate
     finished_flag = False
-    number_of_iterations = 1
+    number_of_iterations = 3
     iter_number = 0
     while (iter_number < number_of_iterations) and finished_flag is False:
-        schedule = obsAllNights(obspars, donepar, all_dates)
+        schedule = obsAllNights(obspars, donepar, all_dates, iter_number)
 
         # Create a copy of the donepar
         new_donepar = donepar.copy()
@@ -811,13 +847,11 @@ class MMT:
     def is_moon_up(self, timestamp):
         """Calculate if the moon is up at the given timestamp."""
 
-        # Calculate the last and next moonrise at this time.
+        # Calculate the last and next moonrise
         self.MMTEphem.date = timestamp
         self.MMTEphem.horizon = '-0:34'
         prev_moonset = self.MMTEphem.previous_setting(pyEphem.Moon())
-        prev_moonset = prev_moonset.datetime()
         prev_moonrise = self.MMTEphem.previous_rising(pyEphem.Moon())
-        prev_moonrise = prev_moonrise.datetime()
         self.MMTEphem.horizon = self.twilight_horizon  # Restore default
 
         if prev_moonset > prev_moonrise:
