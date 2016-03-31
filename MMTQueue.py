@@ -1,3 +1,4 @@
+import ipdb
 """ Queue software for observations at the MMT observatory.
 
 This version is an overhaul of the first system to make it more object
@@ -11,7 +12,9 @@ import ephem as pyEphem
 import datetime
 import numpy as np
 import pandas as pd
-
+import os
+import sys
+from random import randint
 
 def hms2dec(string):
     """Convert a string hms to a float value.
@@ -198,6 +201,7 @@ def read_all_fld_files(runname):
     for (dirpath, dirnames, filenames) in walk(path):
         filelist.extend([dirpath+'/' + f
                          for f in filenames if f[-4:] == '.fld'])
+    print(filelist, runname)
 
     # Create a list of each of the dictionaries from the individual files
     fld_list = []
@@ -250,6 +254,403 @@ def create_blank_done_mask(obspars, runname):
     return pd.DataFrame(dict_list)
 
 
+def moon_flag(fldpar, start_time, end_time):
+    """Calculate a flag for a given field based on the lunar conditions.
+
+    Inputs:
+        fldpar -- field parameter entry for a single field
+        startTime/endTime -- starting and ending time for block
+
+    Output:
+        0/1 flag marking if the field suffers from any lunar issues.
+    """
+    # Parse the target ephemeris to get lunar position and age
+    moon_up_at_start = fldpar.ephem.is_moon_up(start_time)
+    moon_up_at_end = fldpar.ephem.is_moon_up(end_time)
+    # This is set if either start or end is set
+    moon_up = max(moon_up_at_end, moon_up_at_start)
+    moon_age = fldpar.ephem.moon_age(start_time)
+    lunar_distance = fldpar.ephem.lunar_distance(start_time)
+
+    moon_requirement = fldpar.loc[0, 'moon']
+
+    # Check the brightness compared to requirement
+    if moon_requirement == 'bright' and moon_up == 0:
+        # Either the moon is down or bright was requested, so we're good
+        illum_flag = 1
+    elif (moon_requirement == 'grey') and \
+         (abs(moon_age) < 9) and \
+         (lunar_distance < 90):
+        illum_flag = 1
+    elif (moon_requirement == 'dark') and \
+         (abs(moon_age) < 4.5) and \
+         (lunar_distance >= 90):
+        illum_flag = 1
+    else:
+        illum_flag = 0
+
+    # Finally, check to be sure we aren't just plain too close
+    if lunar_distance < 10:
+        illum_flag = 0
+    return illum_flag
+
+
+def calculate_observation_duration(exp_per_visit, n_repeats, fldpar):
+    """Calcualte the duration of an observation.
+
+    This happens a number of places, so removed it to not repeatcode.
+    """
+    total_target_time = exp_per_visit * n_repeats + \
+        mmirs_overheads(fldpar)
+    return datetime.timedelta(seconds=total_target_time)
+
+
+def does_field_fit(fldpar, start_time, donepar):
+    """Calculate a weight if a field fits.
+
+    Here, the weights are either 0 or 1 (does the observation fit).  We also
+    calculate the fraction of the observation that fits in this window.
+
+    Inputs:
+        fldpar -- parameters for the field being considered
+        start_time -- time to begin the search
+        donepar -- tracker of all the finished fields (contains weights)
+    """
+
+    # This only works if fldpar has one entry
+    if len(fldpar) > 1:
+        raise AssertionError("There are more tahn 1 fields with name %s" %
+                             fldpar['objid'])
+
+    # First, get the end of the night time
+    night_end = fldpar.MMT.morning_twilight()
+    time_remaining = (night_end - start_time).total_seconds()  # seconds
+
+    # Is the target observable at the start_time?
+    if fldpar.isObservable(start_time) == 0:
+        return 0.0, start_time, 0
+
+    # Get the exposure parameters for this object
+    # Exposure time is stored in minutes
+    exptime = float(fldpar.loc[0, 'exptime'])*60.0
+    n_repeats = float(fldpar.loc[0, 'repeats']) - \
+        float(donepar.loc[0, 'done_visits'])
+    nexp_per_visit = float(fldpar.loc[0, 'nexp'])
+
+    # Calculate the number of visits that fit (keep it whole -- partial visits
+    # aren't useful).
+    exptime_per_visit = exptime * nexp_per_visit
+    possible_visits = np.floor(
+        (time_remaining - mmirs_overheads(fldpar)) / exptime_per_visit)
+
+    # Can we fit all the requested repeats in?
+    if possible_visits >= n_repeats:
+
+        duration = \
+            calculate_observation_duration(exptime_per_visit,
+                                           n_repeats, fldpar)
+
+        # Is the target still observable at the end_time?
+        if fldpar.isObservable(start_time+duration) == 1:
+            return 1.0, start_time + duration, n_repeats
+        else:
+            possible_visits = n_repeats - 1
+
+    # At this point, we can't fit the whole observation, so let's figure out
+    # how many repeats we can fit in
+    nrepeats_observable = possible_visits
+
+    while nrepeats_observable >= 1:
+        duration = calculate_observation_duration(exptime_per_visit,
+                                                  nrepeats_observable, fldpar)
+        if fldpar.isObservable(start_time+duration) == 1:
+            return 1.0, start_time + duration, nrepeats_observable
+        else:
+            nrepeats_observable -= 1  # Decrement and try again
+
+    # If we get here, we didn't find a combo that works, so return 0
+    return 0, start_time, 0
+
+
+def calc_same_target_flag(fldpar, prev_target):
+    """Return a weight to upweight a target that we are already pointing at.
+
+     This upweights the chances of observing a field we're already looking at
+     rather than paying the overhead fee multiple times.
+     """
+    dist = fldpar.separation(prev_target)
+    dist_weight = 1000.0  # Increase chances of observing nearby target
+    if dist < 10./3600.:
+        return dist_weight
+    else:
+        return 1.0
+
+
+def calc_field_weights(obspar, donepar, start_time, prev_target=None):
+    """Determine the weight for every object at this start time.
+
+    Using this weight we will select the best target to observe here
+    """
+    # Loop through all of the fields and calculate a weight
+    weight_list = []
+
+    for objID in obspar['objid']:
+
+        fldpar = obspar[obspar['objid'] == objID]
+
+        # Have we already observed this target?
+        obj_donepar = donepar[donepar['objid'] == objID]
+        if obj_donepar[0, 'complete'] == 1:
+            continue  # This target is done, skip it
+
+        # Intialize a dictionary to hold our weights
+        obs_weight = {}
+        obs_weight['objid'] = objID
+
+        # Determine if this field fits
+        fit_weight, end_time, obs_visits = \
+            does_field_fit(fldpar, start_time, obj_donepar)
+        if fit_weight == 0:
+            continue  # This target can't be observed, move to next
+
+        # Check the moon conditions
+        moon_weight = moon_flag(fldpar, start_time, end_time)
+        if moon_weight == 0:
+            continue  # Wrong lunar conditions
+
+        # Check to see if the previous target we looked at was in this field
+        if prev_target is not None:
+            dist_weight = calc_same_target_flag(prev_target)
+        else:
+            dist_weight = 1.0
+
+        obs_weight['duration'] = (end_time-start_time).total_seconds()
+        obs_weight['n_visits_scheduled'] = obs_visits
+        obs_weight['target'] = fldpar[0, 'ephem']
+
+        # TODO : Implement priority scheduling both between programs and in PI
+        # Calculate the TAC weight
+        tac_weight = 1.0 * obj_donepar.loc[0, 'time_for_PI'] / \
+            obj_donepar.loc[0, 'allocated_time']
+        # Don't allow this to be exactly zero (divide by zero errors)
+        if tac_weight <= 0:
+            tac_weight = 1e-5
+
+        # Extract the previlous weight
+        prev_weight = obj_donepar.loc[0, 'previous_weight']
+
+        # Calculate the final weight
+        total_weight = dist_weight / tac_weight / prev_weight
+        obs_weight['total_weight'] = total_weight
+        weight_list.append(obs_weight)
+
+    return obs_weight
+
+
+def UpdateRow(obspar, donepar, start_time, prev_target=None):
+    """Coordinate the weight calculation and target selection."""
+
+    obs_weight = calc_field_weights(obspar, donepar,
+                                    start_time, prev_target=prev_target)
+
+    # Find were the weight is the maximum
+    max_weight = max(obs_weight['total_weight'])
+    # If the largest weight is 0, no target was selected
+
+    if max_weight == 0:
+        return None, None
+
+    max_index = []  # Will contain locations of max weights
+    for ii, val in enumerate(obs_weight['total_weight']):
+        if val == max_weight:
+            max_index.append(ii)
+
+    # Do the tie breaking.
+    # TODO: Add tie breaking based on priority or previous observations
+    selected_index = max_index[randint(0, len(max_index)-1)]  # randomly choose
+    selected_object = obs_weight[selected_index]
+
+    # Create the final schedule entry
+    schedule = {}   # Initialize
+    schedule['n_visits_scheduled'] = selected_object['n_visits_scheduled']
+    schedule['duration'] = selected_object['duration']
+    schedule['objid'] = selected_object['objid']
+    schedule['start_time'] = start_time
+    prev_target = selected_object['target']
+
+    # Update the donepar
+    index = [i for i, x in
+             enumerate(donepar['objid'] == schedule['objid']) if x]
+    PI = donepar.loc[index, 'PI']
+    for ii in range(len(obspar)):
+        if donepar.loc[ii, 'PI'] == PI:
+            donepar.loc[ii, 'time_for_PI'] += schedule['duration'] / 3600.0
+            donepar.loc[ii, 'current_weight'] = \
+                donepar.loc[ii, 'time_for_PI'] / \
+                donepar.loc[ii, 'allocated_time']
+    donepar.loc[index, 'done_visits'] += \
+        selected_object['n_visits_scheduled']
+
+    # Check to see if this object is now done
+    requested = int(obspar[obspar['objid'] == schedule['objid']]['repeats'])
+    if donepar.loc[index, 'done_visits'] >= requested:
+        donepar.loc[index, 'complete'] = 1
+
+    return schedule, prev_target
+
+
+def obsOneNight(obspar, donepar, date):
+    """Fully schedule one night."""
+    mmt = MMT()
+
+    # Start at twilight and add observations. Each time, increment the
+    # current time by the previous duration. If nothing add 20 minutes and try
+    # again.
+    current_time = mmt.evening_twilight(date)
+    schedule = []
+
+    # Set some flags
+    all_done = False
+    prev_target = None
+
+    while (current_time < mmt.morning_twilight(date)) and (all_done is False):
+
+        new_sched, new_target = \
+            UpdateRow(obspar, donepar, current_time, prev_target=prev_target)
+
+        # Was anything observed?
+        if new_sched is None:
+            current_time += datetime.timedelta(minutes=20)
+        else:
+            # Append new entry to schedule
+            schedule.append(new_sched)
+            current_time += \
+                datetime.timedelta(seconds=new_sched['duration'])
+            if min(donepar['complete']) == 1:
+                all_done = True
+
+
+def obsAllNights(obspar, donepar, all_dates):
+    """Iterate through nights and schedule."""
+    full_schedule = []
+    for date in all_dates:
+        sys.stdout.write("\r Working on Date %s" % date)
+        schedule = obsOneNight(obspar, donepar, date)
+        for line in schedule:
+            full_schedule.append(line)
+    return full_schedule
+
+
+def read_donefile(donepar, runname):
+    """Reads in the mmirs_catalogs/runname/donelist.dat file.
+
+    Updates the donepar to include these previously observed fields.
+    """
+
+    donefile = 'mmirs_catalogs/' + runname + '/donelist.dat'
+    if os.path.isfile(donefile):
+        f = open(donefile)
+        for line in f.readlines():
+            if line[0] != '#' and line.strip() != '':
+                sline = line.strip().split()
+                id = sline[0]
+                pi = sline[1]
+                visits = float(sline[2])
+                donetime = float(sline[3])
+                completed = float(sline[4])
+
+                if max(donepar['objid'] == id) is False:
+                    raise Exception("No match found for %s" % id)
+                if donepar.loc[donepar['objid'] == id,
+                               'done_vistits'].max() > 0:
+                    raise Exception("Field %s is listed multiple times in" +
+                                    " donefile" % id)
+
+                donepar.loc[donepar['objid'] == id, 'done_visits'] = visits
+                donepar.loc[donepar['PI'] == pi, 'time_for_PI'] += donetime
+                donepar.loc[donepar['objid'] == id, 'complete'] = completed
+
+        f.close()
+    return donepar
+
+
+def read_fitdates():
+    """Read the list of dates to fit. This is fitdates.dat.
+
+    This definitely needs to change to become more general and
+    requiring less hardcoding.
+    """
+    date_file = 'fitdates.dat'
+    f = open(date_file, 'r')
+    all_dates = []
+    for line in f.readlines():
+        if line[0] != '#' and line.strip() != '':
+            all_dates.append(line.strip())
+    f.close()
+
+    return all_dates
+
+
+def main(args):
+    """Main processing function."""
+    print(len(args))
+    if len(args) < 2:
+        print("HERE")
+        raise Exception("Must specify a run name")
+    else:
+        runname = args[1]
+
+    print(runname)
+    # Read in the objects for this run
+    obspars = read_all_fld_files(runname)
+
+    # Create a blank donepar
+    orig_donepar = create_blank_done_mask(obspars, runname)
+    donepar = orig_donepar.copy()   # This is the working copy
+
+    # Read in the dates to be fit
+    all_dates = read_fitdates()
+
+    # Iterate
+    finished_flag = False
+    number_of_iterations = 5
+    iter_number = 0
+    while (iter_number < number_of_iterations) and finished_flag is False:
+        schedule = obsAllNights(obspars, donepar, all_dates)
+
+        # Create a copy of the donepar
+        new_donepar = donepar.copy()
+
+        # Restore the original values from the donefiles
+        new_donepar.loc[:, 'complete'] = orig_donepar['complete']
+        new_donepar.loc[:, 'time_for_PI'] = orig_donepar['time_for_PI']
+        new_donepar.loc[:, 'done_visits'] = orig_donepar['done_vistits']
+
+        # Check to see if all fields are done
+        done_dict = {}
+        for ii in range(len(donepar)):
+            pi = donepar.loc[ii, 'pi']
+            if pi not in done_dict:
+                completed = donepar[donepar['PI'] == pi]['complete'].values
+                if min(completed) == 1:
+                    done_dict[pi] = True
+                else:
+                    done_dict[pi] = False
+            new_donepar.loc[ii, 'previous_weight'] = \
+                donepar.loc[ii, 'current_weight']
+
+        # Check to see if we're done
+        if min(done_dict.values()) == 1:
+            finished_flag = True
+        new_donepar.loc[:, 'current_weight'] = 0.0
+        donepar = new_donepar
+        iter_number += 1
+
+    # Write out the schedule
+    outfile = 'schedule.csv'
+    schedule.to_csv(outfile)
+
+
 class Target:
 
     """Define the Target class."""
@@ -276,6 +677,7 @@ class Target:
             return 0
 
         # Check the rotator limit
+        # TODO Add longslit check for +180 and 0
         rotator_limits = [-180, 164]
         rotAngle = self.rotator_angle(timestamp)
         if rotAngle < rotator_limits[0] or \
@@ -416,7 +818,5 @@ class MMT:
 
 
 if __name__ == "__main__":
-    filename = 'mmirs_catalogs/2016a/UAO-S143-DStark/UAO-S143_gdnel31_J.fld'
     runname = '2016a'
-    fldpar = read_all_fld_files('2016a')
-    print(fldpar.head())
+    main(runname)
