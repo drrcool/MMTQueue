@@ -16,6 +16,7 @@ import os
 import sys
 from random import randint
 
+
 def hms2dec(string):
     """Convert a string hms to a float value.
 
@@ -44,6 +45,7 @@ def AngSep(ra1, dec1, ra2, dec2):
 
     Output is in decimal degrees.
     """
+
     y = np.cos(dec1) * np.cos(dec2)
     z = np.sin(dec1) * np.sin(dec2)
     x = np.cos(ra1 - ra2)
@@ -201,7 +203,6 @@ def read_all_fld_files(runname):
     for (dirpath, dirnames, filenames) in walk(path):
         filelist.extend([dirpath+'/' + f
                          for f in filenames if f[-4:] == '.fld'])
-    print(filelist, runname)
 
     # Create a list of each of the dictionaries from the individual files
     fld_list = []
@@ -265,14 +266,14 @@ def moon_flag(fldpar, start_time, end_time):
         0/1 flag marking if the field suffers from any lunar issues.
     """
     # Parse the target ephemeris to get lunar position and age
-    moon_up_at_start = fldpar.ephem.is_moon_up(start_time)
-    moon_up_at_end = fldpar.ephem.is_moon_up(end_time)
+    moon_up_at_start = fldpar.iloc[0]['ephem'].MMT.is_moon_up(start_time)
+    moon_up_at_end = fldpar.iloc[0]['ephem'].MMT.is_moon_up(end_time)
     # This is set if either start or end is set
     moon_up = max(moon_up_at_end, moon_up_at_start)
-    moon_age = fldpar.ephem.moon_age(start_time)
-    lunar_distance = fldpar.ephem.lunar_distance(start_time)
+    moon_age = fldpar.iloc[0]['ephem'].MMT.moon_age(start_time)
+    lunar_distance = fldpar.iloc[0]['ephem'].lunar_distance(start_time)
 
-    moon_requirement = fldpar.loc[0, 'moon']
+    moon_requirement = fldpar.iloc[0]['moon']
 
     # Check the brightness compared to requirement
     if moon_requirement == 'bright' and moon_up == 0:
@@ -323,19 +324,20 @@ def does_field_fit(fldpar, start_time, donepar):
                              fldpar['objid'])
 
     # First, get the end of the night time
-    night_end = fldpar.MMT.morning_twilight()
+
+    night_end = fldpar.iloc[0]['ephem'].MMT.morning_twilight(start_time)
     time_remaining = (night_end - start_time).total_seconds()  # seconds
 
     # Is the target observable at the start_time?
-    if fldpar.isObservable(start_time) == 0:
+    if fldpar.iloc[0]['ephem'].isObservable(start_time) == 0:
         return 0.0, start_time, 0
 
     # Get the exposure parameters for this object
     # Exposure time is stored in minutes
-    exptime = float(fldpar.loc[0, 'exptime'])*60.0
-    n_repeats = float(fldpar.loc[0, 'repeats']) - \
-        float(donepar.loc[0, 'done_visits'])
-    nexp_per_visit = float(fldpar.loc[0, 'nexp'])
+    exptime = float(fldpar.iloc[0]['exptime'])*60.0
+    n_repeats = float(fldpar.iloc[0]['repeats']) - \
+        float(donepar.iloc[0]['done_visits'])
+    nexp_per_visit = float(fldpar.iloc[0]['nexp'])
 
     # Calculate the number of visits that fit (keep it whole -- partial visits
     # aren't useful).
@@ -351,7 +353,7 @@ def does_field_fit(fldpar, start_time, donepar):
                                            n_repeats, fldpar)
 
         # Is the target still observable at the end_time?
-        if fldpar.isObservable(start_time+duration) == 1:
+        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration) == 1:
             return 1.0, start_time + duration, n_repeats
         else:
             possible_visits = n_repeats - 1
@@ -363,7 +365,7 @@ def does_field_fit(fldpar, start_time, donepar):
     while nrepeats_observable >= 1:
         duration = calculate_observation_duration(exptime_per_visit,
                                                   nrepeats_observable, fldpar)
-        if fldpar.isObservable(start_time+duration) == 1:
+        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration) == 1:
             return 1.0, start_time + duration, nrepeats_observable
         else:
             nrepeats_observable -= 1  # Decrement and try again
@@ -394,15 +396,7 @@ def calc_field_weights(obspar, donepar, start_time, prev_target=None):
     # Loop through all of the fields and calculate a weight
     weight_list = []
 
-    for objID in obspar['objid']:
-
-        fldpar = obspar[obspar['objid'] == objID]
-
-        # Have we already observed this target?
-        obj_donepar = donepar[donepar['objid'] == objID]
-        if obj_donepar[0, 'complete'] == 1:
-            continue  # This target is done, skip it
-
+    def calc_single_weight(fldpar, obj_donepar, start_time, prev_target=None):
         # Intialize a dictionary to hold our weights
         obs_weight = {}
         obs_weight['objid'] = objID
@@ -410,13 +404,9 @@ def calc_field_weights(obspar, donepar, start_time, prev_target=None):
         # Determine if this field fits
         fit_weight, end_time, obs_visits = \
             does_field_fit(fldpar, start_time, obj_donepar)
-        if fit_weight == 0:
-            continue  # This target can't be observed, move to next
 
         # Check the moon conditions
         moon_weight = moon_flag(fldpar, start_time, end_time)
-        if moon_weight == 0:
-            continue  # Wrong lunar conditions
 
         # Check to see if the previous target we looked at was in this field
         if prev_target is not None:
@@ -426,25 +416,41 @@ def calc_field_weights(obspar, donepar, start_time, prev_target=None):
 
         obs_weight['duration'] = (end_time-start_time).total_seconds()
         obs_weight['n_visits_scheduled'] = obs_visits
-        obs_weight['target'] = fldpar[0, 'ephem']
+        obs_weight['target'] = fldpar.iloc[0]['ephem']
 
         # TODO : Implement priority scheduling both between programs and in PI
         # Calculate the TAC weight
-        tac_weight = 1.0 * obj_donepar.loc[0, 'time_for_PI'] / \
-            obj_donepar.loc[0, 'allocated_time']
+        tac_weight = 1.0 * obj_donepar.iloc[0]['time_for_PI'] / \
+            obj_donepar.iloc[0]['allocated_time']
         # Don't allow this to be exactly zero (divide by zero errors)
         if tac_weight <= 0:
             tac_weight = 1e-5
 
         # Extract the previlous weight
-        prev_weight = obj_donepar.loc[0, 'previous_weight']
+        prev_weight = obj_donepar.iloc[0]['previous_weight']
 
         # Calculate the final weight
-        total_weight = dist_weight / tac_weight / prev_weight
+        total_weight = dist_weight / tac_weight / prev_weight * \
+            fit_weight * moon_weight
         obs_weight['total_weight'] = total_weight
+
+        return obs_weight
+
+    for objID in obspar['objid']:
+
+        fldpar = obspar[obspar['objid'] == objID]
+
+        # Have we already observed this target?
+        obj_donepar = donepar[donepar['objid'] == objID]
+        if obj_donepar.iloc[0]['complete'] == 1:
+            continue
+
+        obs_weight = calc_single_weight(fldpar, obj_donepar,
+                                        start_time, prev_target=prev_target)
+
         weight_list.append(obs_weight)
 
-    return obs_weight
+    return pd.DataFrame(weight_list)
 
 
 def UpdateRow(obspar, donepar, start_time, prev_target=None):
@@ -454,6 +460,7 @@ def UpdateRow(obspar, donepar, start_time, prev_target=None):
                                     start_time, prev_target=prev_target)
 
     # Find were the weight is the maximum
+
     max_weight = max(obs_weight['total_weight'])
     # If the largest weight is 0, no target was selected
 
@@ -461,6 +468,7 @@ def UpdateRow(obspar, donepar, start_time, prev_target=None):
         return None, None
 
     max_index = []  # Will contain locations of max weights
+
     for ii, val in enumerate(obs_weight['total_weight']):
         if val == max_weight:
             max_index.append(ii)
@@ -468,7 +476,7 @@ def UpdateRow(obspar, donepar, start_time, prev_target=None):
     # Do the tie breaking.
     # TODO: Add tie breaking based on priority or previous observations
     selected_index = max_index[randint(0, len(max_index)-1)]  # randomly choose
-    selected_object = obs_weight[selected_index]
+    selected_object = obs_weight.iloc[selected_index]
 
     # Create the final schedule entry
     schedule = {}   # Initialize
@@ -481,10 +489,12 @@ def UpdateRow(obspar, donepar, start_time, prev_target=None):
     # Update the donepar
     index = [i for i, x in
              enumerate(donepar['objid'] == schedule['objid']) if x]
-    PI = donepar.loc[index, 'PI']
+    index = index[0]
+    PI = donepar.iloc[index]['PI']
     for ii in range(len(obspar)):
         if donepar.loc[ii, 'PI'] == PI:
-            donepar.loc[ii, 'time_for_PI'] += schedule['duration'] / 3600.0
+            donepar.loc[ii, 'time_for_PI'] += \
+                selected_object['duration'] / 3600.0
             donepar.loc[ii, 'current_weight'] = \
                 donepar.loc[ii, 'time_for_PI'] / \
                 donepar.loc[ii, 'allocated_time']
@@ -528,7 +538,7 @@ def obsOneNight(obspar, donepar, date):
                 datetime.timedelta(seconds=new_sched['duration'])
             if min(donepar['complete']) == 1:
                 all_done = True
-
+    return schedule
 
 def obsAllNights(obspar, donepar, all_dates):
     """Iterate through nights and schedule."""
@@ -538,7 +548,7 @@ def obsAllNights(obspar, donepar, all_dates):
         schedule = obsOneNight(obspar, donepar, date)
         for line in schedule:
             full_schedule.append(line)
-    return full_schedule
+    return pd.DataFrame(full_schedule)
 
 
 def read_donefile(donepar, runname):
@@ -562,7 +572,7 @@ def read_donefile(donepar, runname):
                 if max(donepar['objid'] == id) is False:
                     raise Exception("No match found for %s" % id)
                 if donepar.loc[donepar['objid'] == id,
-                               'done_vistits'].max() > 0:
+                               'done_visits'].max() > 0:
                     raise Exception("Field %s is listed multiple times in" +
                                     " donefile" % id)
 
@@ -593,14 +603,11 @@ def read_fitdates():
 
 def main(args):
     """Main processing function."""
-    print(len(args))
     if len(args) < 2:
-        print("HERE")
         raise Exception("Must specify a run name")
     else:
         runname = args[1]
 
-    print(runname)
     # Read in the objects for this run
     obspars = read_all_fld_files(runname)
 
@@ -613,7 +620,7 @@ def main(args):
 
     # Iterate
     finished_flag = False
-    number_of_iterations = 5
+    number_of_iterations = 1
     iter_number = 0
     while (iter_number < number_of_iterations) and finished_flag is False:
         schedule = obsAllNights(obspars, donepar, all_dates)
@@ -624,12 +631,12 @@ def main(args):
         # Restore the original values from the donefiles
         new_donepar.loc[:, 'complete'] = orig_donepar['complete']
         new_donepar.loc[:, 'time_for_PI'] = orig_donepar['time_for_PI']
-        new_donepar.loc[:, 'done_visits'] = orig_donepar['done_vistits']
+        new_donepar.loc[:, 'done_visits'] = orig_donepar['done_visits']
 
         # Check to see if all fields are done
         done_dict = {}
         for ii in range(len(donepar)):
-            pi = donepar.loc[ii, 'pi']
+            pi = donepar.loc[ii, 'PI']
             if pi not in done_dict:
                 completed = donepar[donepar['PI'] == pi]['complete'].values
                 if min(completed) == 1:
@@ -660,7 +667,7 @@ class Target:
 
         self.ra = ra
         self.dec = dec
-        self.position_angle = position_angle
+        self.position_angle = float(position_angle)
         self.ephem = pyEphem.FixedBody()
         self.ephem._ra = self.ra
         self.ephem._dec = self.dec
@@ -706,7 +713,7 @@ class Target:
         """Given a targets position and time, calculate the airmass."""
 
         # Calculate the alt az
-        alt, az = self.AltAz(timestamp, self.MMT.MMTEphem)
+        alt, az = self.AltAz(timestamp)
         zenith_angle = 90.0 - alt
         za_radians = zenith_angle / 180.0 * np.pi
         return 1.0 / np.cos(za_radians)
@@ -720,6 +727,7 @@ class Target:
     def rotator_angle(self, timestamp):
         """Calculate the rotator angle needed for the PA and time."""
         parAngle = self.parallactic_angle(timestamp) * 180.0 / np.pi
+
         rotAngle = parAngle - self.position_angle
 
         # Account for the fact that 355 and -5 are the same angle
@@ -730,12 +738,13 @@ class Target:
 
     def separation(self, Target):
         """Calculate the distance between this target and another"""
-        return AngSep(self.ra, self.dec, Target.ra, Target.dec)
+        # Convert coordinates to radians
+        return AngSep(self.ephem._ra, self.ephem._dec, Target.ra, Target.dec)
 
     def lunar_distance(self, timestamp):
         """Calculate the distance to the moon."""
         moon_ra, moon_dec = self.MMT.moonPosition(timestamp)
-        return AngSep(self.ra, self.dec, moon_ra, moon_dec)
+        return AngSep(self.ephem._ra, self.ephem._dec, moon_ra, moon_dec)
 
 
 class MMT:
@@ -818,5 +827,4 @@ class MMT:
 
 
 if __name__ == "__main__":
-    runname = '2016a'
-    main(runname)
+    main(sys.argv)
