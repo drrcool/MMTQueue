@@ -1,0 +1,19 @@
+<link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
+<link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap-theme.min.css">
+
+<div class="container">
+    <div class="panel panel-default">
+        <div class="panel-heading"><string>Upload Masks</string></div>
+        <div class="panel-body">
+
+            <h4>Select files from your computer</h4>
+            <form action="{% url 'upload_mask' %}" method="post" encode="multipart/form_data" id="js_upload-form">
+                {% csrf_token %}
+                <div class="form-group">
+                        {{ form.as_ul }}
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-primary" id='js-upload-submit'>Upload File</button>
+            </form>
+        </div>
+    </div>
+</div>
