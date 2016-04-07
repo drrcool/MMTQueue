@@ -444,8 +444,6 @@ def calc_single_weight(fldpar, obj_donepar, start_time,
         fit_weight * moon_weight
     obs_weight['total_weight'] = total_weight
 
-
-
     return obs_weight
 
 
@@ -477,7 +475,7 @@ def calc_field_weights(obspar, donepar, start_time, moon_up_time, moon_up_array,
 
 
 def UpdateRow(obspar, donepar, start_time, moon_up_time, moon_up,
-              prev_target=None):
+              prev_target=None, runname="unspecified"):
     """Coordinate the weight calculation and target selection."""
 
     obs_weight = calc_field_weights(obspar, donepar,
@@ -509,6 +507,7 @@ def UpdateRow(obspar, donepar, start_time, moon_up_time, moon_up,
     schedule['duration'] = selected_object['duration']
     schedule['objid'] = selected_object['objid']
     schedule['start_time'] = start_time
+    schedule['run'] = runname  # This is not elegant
     prev_target = selected_object['target']
 
     # Update the donepar
@@ -534,7 +533,7 @@ def UpdateRow(obspar, donepar, start_time, moon_up_time, moon_up,
     return schedule, prev_target
 
 
-def obsOneNight(obspar, donepar, date):
+def obsOneNight(obspar, donepar, date, runname):
     """Fully schedule one night."""
     mmt = MMT()
 
@@ -560,7 +559,7 @@ def obsOneNight(obspar, donepar, date):
 
         new_sched, new_target = \
             UpdateRow(obspar, donepar, current_time, time_array, moon_up,
-                      prev_target=prev_target)
+                      prev_target=prev_target, runname=runname)
 
         # Was anything observed?
         if new_sched is None:
@@ -575,13 +574,13 @@ def obsOneNight(obspar, donepar, date):
     return schedule
 
 
-def obsAllNights(obspar, donepar, all_dates, iter_number):
+def obsAllNights(obspar, donepar, all_dates, iter_number, runname):
     """Iterate through nights and schedule."""
     full_schedule = []
     for date in all_dates:
         sys.stdout.write("\r Working on Date %s of iteration %d" %
                          (date, iter_number))
-        schedule = obsOneNight(obspar, donepar, date)
+        schedule = obsOneNight(obspar, donepar, date, runname)
         for line in schedule:
             full_schedule.append(line)
     return pd.DataFrame(full_schedule)
@@ -659,7 +658,8 @@ def main(args):
     number_of_iterations = 3
     iter_number = 0
     while (iter_number < number_of_iterations) and finished_flag is False:
-        schedule = obsAllNights(obspars, donepar, all_dates, iter_number)
+        schedule = obsAllNights(obspars, donepar, all_dates,
+                                iter_number, runname)
 
         # Create a copy of the donepar
         new_donepar = donepar.copy()
