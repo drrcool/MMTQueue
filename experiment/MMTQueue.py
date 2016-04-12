@@ -15,7 +15,6 @@ import pandas as pd
 import os
 import sys
 from random import randint
-import time
 
 
 def hms2dec(string):
@@ -281,11 +280,8 @@ def moon_flag(fldpar, start_time, end_time, moon_up_time, moon_up_array):
     # This is set if either start or end is set
     moon_up = max(moon_up_at_end, moon_up_at_start)
 
-    agestart = time.time()
     moon_age = fldpar.iloc[0]['ephem'].MMT.moon_age(start_time)
     lunar_distance = fldpar.iloc[0]['ephem'].lunar_distance(start_time)
-
-
     moon_requirement = fldpar.iloc[0]['moon']
 
     # Check the brightness compared to requirement
@@ -306,7 +302,6 @@ def moon_flag(fldpar, start_time, end_time, moon_up_time, moon_up_array):
     # Finally, check to be sure we aren't just plain too close
     if lunar_distance < 10:
         illum_flag = 0
-
 
     return illum_flag
 
@@ -424,6 +419,7 @@ def calc_single_weight(fldpar, obj_donepar, start_time,
     else:
         dist_weight = 1.0
 
+    obs_weight['end_time'] = end_time
     obs_weight['duration'] = (end_time-start_time).total_seconds()
     obs_weight['n_visits_scheduled'] = obs_visits
     obs_weight['target'] = fldpar.iloc[0]['ephem']
@@ -447,8 +443,8 @@ def calc_single_weight(fldpar, obj_donepar, start_time,
     return obs_weight
 
 
-def calc_field_weights(obspar, donepar, start_time, moon_up_time, moon_up_array,
-                       prev_target=None):
+def calc_field_weights(obspar, donepar, start_time, moon_up_time,
+                       moon_up_array, prev_target=None):
     """Determine the weight for every object at this start time.
 
     Using this weight we will select the best target to observe here
@@ -466,8 +462,11 @@ def calc_field_weights(obspar, donepar, start_time, moon_up_time, moon_up_array,
         if obj_donepar.iloc[0]['complete'] == 1:
             continue
 
-        obs_weight = calc_single_weight(fldpar, obj_donepar,
-                                        start_time, moon_up_time, moon_up_array,
+        obs_weight = calc_single_weight(fldpar,
+                                        obj_donepar,
+                                        start_time,
+                                        moon_up_time,
+                                        moon_up_array,
                                         prev_target=prev_target)
         append(obs_weight)
 
@@ -506,6 +505,7 @@ def UpdateRow(obspar, donepar, start_time, moon_up_time, moon_up,
     schedule['n_visits_scheduled'] = selected_object['n_visits_scheduled']
     schedule['duration'] = selected_object['duration']
     schedule['objid'] = selected_object['objid']
+    schedule['end_time'] = selected_object['end_time']
     schedule['start_time'] = start_time
     schedule['run'] = runname  # This is not elegant
     prev_target = selected_object['target']
@@ -636,6 +636,35 @@ def read_fitdates():
     return all_dates
 
 
+def schedule_to_json(schedule, obspars, outfile='schedule.json'):
+    """Create a JSON file containing all the information to be parsed.
+
+    This is in the format of the JavaScript FullCalendar module.
+
+    The API for Event Objects is found at
+    http://fullcalendar.io/docs/event_data/Event_Object/
+    """
+    json_schedule_list = []
+    for ii in range(len(schedule)):
+        entry = schedule.loc[ii, :]
+
+        # Create a blank dictionary to hold the output
+        json_template = {}
+        json_template['title'] = entry['objid']
+        # Times need to be in YYYY-MM-DDTHH:MM:SS
+
+        json_template['start'] = \
+            str(entry['start_time']).replace(' ', 'T')[0:19]
+        json_template['end'] = \
+            str(entry['end_time']).replace(' ', 'T')[0:19]
+        json_template['url'] = 'fields/' + entry['objid']
+        json_schedule_list.append(json_template)
+
+    outframe = pd.DataFrame.from_dict(json_schedule_list)
+
+    outframe.to_json(outfile, orient='records')
+
+
 def main(args):
     """Main processing function."""
     if len(args) < 2:
@@ -655,7 +684,7 @@ def main(args):
 
     # Iterate
     finished_flag = False
-    number_of_iterations = 3
+    number_of_iterations = 1
     iter_number = 0
     while (iter_number < number_of_iterations) and finished_flag is False:
         schedule = obsAllNights(obspars, donepar, all_dates,
@@ -692,6 +721,10 @@ def main(args):
     # Write out the schedule
     outfile = 'schedule.csv'
     schedule.to_csv(outfile)
+
+    # Now, parse the schedule to JSON for plotting
+    jsonfile = 'schedule.json'
+    schedule_to_json(schedule, obspars, outfile=jsonfile)
 
 
 class Target:

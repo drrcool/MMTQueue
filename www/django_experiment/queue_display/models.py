@@ -1,6 +1,7 @@
 from django.db import models
-from django.utils import timezone
-import queue_tools
+import pandas as pd
+from . import queue_tools
+import time
 
 
 class Observing_block(models.Model):
@@ -11,6 +12,7 @@ class Observing_block(models.Model):
     n_visits = models.IntegerField()
     objID = models.CharField(max_length=50)
     start_time = models.CharField(max_length=50)
+    end_time = models.CharField(max_length=50)
 
     # Object parameters from FLD file
     ra = models.CharField(max_length=50)
@@ -42,38 +44,61 @@ class Observing_block(models.Model):
 
     def fill_from_schedule(self, line, fldPar):
         """Give a CSV line from the schedule output and fill."""
-        _, self.duration, self.n_visits, self.objID, _, self.start_time = \
-            line.strip().split()
+        self.duration = line['duration']
+        self.start_time = line['start_time']
+        self.n_visits = line['n_visits_scheduled']
+        self.objID = line['objid']
+        self.end_time = line['end_time']
 
         # Find the object in fldPar that matches
         objpar = fldPar[fldPar['objid'] == self.objID]
-        self.ra =
+        self.ra = objpar['ra']
+        self.dec = objpar['dec']
+        self.pmra = objpar['pmra']
+        self.pmdec = objpar['pmdec']
+        self.pa = objpar['pa']
+        self.moon = objpar['moon']
+        self.exptime = objpar['exptime']
+        self.nexp = objpar['nexp']
+        self.repeats = objpar['repeats']
+        self.oneper = objpar['oneper']
+        self.priority = objpar['priority']
+        self.grism = objpar['grism']
+        self.filters = objpar['filter']
+        self.epoch = objpar['epoch']
+        self.dithersize = objpar['dithersize']
+        self.seeing = objpar['seeing']
+        self.photometric = objpar['photometric']
+        self.readtab = objpar['readtab']
+        self.gain = objpar['gain']
+        self.obstype = objpar['obstype']
+        self.mag = objpar['mag']
+        self.mask = objpar['mask']
 
 
-
-
-
-
-class schedule(models.Models):
+class Schedule(models.Model):
     """Read in the schedule file and create a list of blocks."""
 
+    time0 = time.time()
     schedule_file = 'schedule.csv'
-    schedule_path = '/Users/rcool/MMTQueue/experimenta/'
-
-
-    f = open(schedule_path + schedule_file, 'r')
-    f.readline()  # Read in the header
+    schedule_path = '/Users/rcool/MMTQueue/experiment/'
+    sched = pd.read_csv(schedule_path+schedule_file)
 
     # Set the run to None and trigger to read it
     run_name = None
+    objlist = []
 
     # Parse schedule lines
-    for line in f.readlines():
-        if run_name = None:
-            run_name = line.strip().split()[4]
+    for ii in range(len(sched)):
+        if run_name is None:
+            run_name = sched.loc[0, 'run']
 
-            # Read the fldpars
-            fldpars = queue_tools.read_all_fld_files(run_name)
+        line = sched.loc[ii, :]
+        # Read the fldpars
+        fldpars = queue_tools.read_all_fld_files(run_name)
 
         obj = Observing_block()
-        obj.fill_from_schedule(line, fldpar)
+        obj.fill_from_schedule(line, fldpars)
+        objlist.append(obj)
+
+    print(time.time()-time0)

@@ -18,5 +18,7 @@ from django.contrib import admin
 
 urlpatterns = [
     url(r'^catalogs/', include('catalogs.urls')),
+    url(r'^schedule/', include('queue_display.urls')),
     url(r'^admin/', admin.site.urls),
+
 ]
