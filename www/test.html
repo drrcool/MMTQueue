@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" type="text/css" rel="stylesheet"  />
+    <link href="http://cdnjs.cloudflare.com/ajax/libs/fullcalendar/2.6.1/fullcalendar.min.css" type="text/css" rel="stylesheet" />
+    <link href="schedule.css" type="text/css" rel="stylesheet" />
+</head>
+
+<body>
+
+<!-- The calendar should be in a div called 'calendar' -->
+<div id='calendar'></div>
+
+<!-- Create a modal markup -->
+<div id='fullCalModal' class="modal fade">
+    <div class='modal-dialog'>
+        <div class='modal-content'>
+            <div class='modal-header'>
+                <button type='button' class='close' data-dismiss='modal'>
+                    <span aria-hidden="true"></span>
+                    <span class='sr-only'>close</span>
+                </button>
+                <div class="row">
+                    <h4 class='modal-title col-md-6'>Field:</h4>
+                    <h4 id='modalTitle' class='modal-title col-md-6 text-right'></h4>
+                </div>
+            </div>
+
+            <div class="modal-body">
+                <div class='container-fluid'>
+                    <div class="row">
+                        <div class="col-md-2 sched_param">Obstype:</div>
+                        <div class="col-md-10" id='modal_obstype'></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-2 sched_param">PI:</div>
+                        <div class="col-md-10" id='modal_pi'></div>
+                    </div>
+                    <hr />
+
+                    <div class="row">
+                        <div class="col-sm-4 sched_param">Right Ascension:</div>
+                        <div class="col-md-3" id='modal_ra'></div>
+                        <div class="col-md-2 sched_param text-right">Filter:</div>
+                        <div class="col-md-3" id='modal_filter'></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 sched_param">Declination:</div>
+                        <div class="col-md-3" id='modal_dec'></div>
+                        <div class='col-md-2 sched_param text-right'>Grism:</div>
+                        <div class='col-md-3' id='modal_grism'></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 sched_param">Magnitude:</div>
+                        <div class="col-md-3" id='modal_mag'></div>
+                        <div class='col-md-2 sched_param text-right'>Gain:</div>
+                        <div class='col-md-3' id='modal_gain'></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 sched_param">Mask:</div>
+                        <div class="col-md-3" id='modal_mask'></div>
+                        <div class='col-md-2 sched_param text-right'>Readtab:</div>
+                        <div class='col-md-3' id='modal_readtab'></div>
+                    </div>
+                    <hr />
+
+                    <div class="row">
+                        <div class="col-md-4 sched_param">Exposure Time:</div>
+                        <div class="col-md-3" id='modal_exptime'></div>
+                        <div class='col-md-3 sched_param text-right'>Total Exp. Time:</div>
+                        <div class='col-md-2' id='modal_totalexptime'></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 sched_param">Images per Dither:</div>
+                        <div class="col-md-3" id='modal_nexp'></div>
+                        <div class='col-md-3 sched_param text-right'>Dithersize:</div>
+                        <div class='col-md-2' id='modal_dithersize'></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 sched_param">Number of Dithers:</div>
+                        <div class="col-md-3" id='modal_nvisits_scheduled'></div>
+                        <div class='col-md-3 sched_param text-right'>Total Images:</div>
+                        <div class='col-md-2' id='modal_nexposures'></div>
+                    </div>
+
+                    <hr />
+                    <div class="row">
+                        <div class='col-md-10 sched_param text-right'>Requested Seeing:</div>
+                        <div class='col-md-2' id='modal_seeing'></div>
+                    </div>
+                    <div class='row'>
+                        <div class='col-md-10 sched_param text-right'>Photometric Required:</div>
+                        <div class='col-md-2' id='modal_photometric'></div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger"
+                        data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.8.2/moment.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/2.6.1/fullcalendar.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script>
+
+
+<script>
+    $(document).ready(function() {
+        // Page is ready, initialize the calendar
+        $('#calendar').fullCalendar({
+            events: 'schedule.json',
+            header: {
+                left: ',prev,next today',
+                center: 'title',
+                right: 'month,agendaWeek,agendaDay'
+            },
+            defaultView: 'month',
+            allDaySlot: false,
+            minTime: "00:00:00",
+            maxTime: "16:00:00",
+            eventTextColor: "black",
+            displayEventTime: false,
+
+            eventRender: function(event, element) {
+                element.find('.fc-title').html('<center>'+
+                    element.find('.fc-title').text() +
+                    '</center>');
+            },
+
+            dayClick: function(date, jsEvent, view) {
+                $('#calendar').fullCalendar('select', date);
+                $('#calendar').fullCalendar('gotoDate', date);
+                $('#calendar').fullCalendar('changeView', 'agendaWeek');
+            },
+
+            eventClick: function(event, jsEvent, view) {
+                $('#modalTitle').html(event.title);
+                $('#modal_ra').html(event.ra);
+                $('#modal_obstype').html(event.obstype);
+                $('#modal_pi').html(event.PI);
+                $('#modal_dec').html(event.dec);
+                $('#modal_mag').html(event.mag);
+                $('#modal_mask').html(event.mask);
+                $('#modal_filter').html(event.filter);
+                $("#modal_grism").html(event.grism);
+                $('#modal_gain').html(event.gain);
+                $('#modal_readtab').html(event.readtab);
+                $('#modal_exptime').html(event.exptime*60.);
+                $('#modal_nexp').html(event.repeats);
+                $('#modal_nvisits_scheduled').html(event.n_visits_scheduled);
+                $('#modal_dithersize').html(event.dithersize);
+                $("#modal_nexposures").html(event.n_visits_scheduled*event.repeats);
+                $('#modal_totalexptime').html(event.n_visits_scheduled*event.repeats*event.exptime*60);
+                $('#modal_photometric').html(event.photometric);
+                $('#modal_seeing').html(event.seeing);
+                console.log(event);
+                $('#fullCalModal').modal();
+                return false;
+            }
+        });
+    });
+</script>
+
+</body>
+</html>

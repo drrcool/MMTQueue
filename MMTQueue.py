@@ -14,7 +14,189 @@ import numpy as np
 import pandas as pd
 import os
 import sys
+import re
 from random import randint
+import matplotlib.pyplot as plt
+
+
+class Target:
+
+    """Define the Target class."""
+
+    def __init__(self, ra, dec, position_angle):
+        """Intialize the target object."""
+
+        self.ra = ra
+        self.dec = dec
+        self.position_angle = float(position_angle)
+        self.ephem = pyEphem.FixedBody()
+        self.ephem._ra = self.ra
+        self.ephem._dec = self.dec
+        self.ephem._epoch = pyEphem.J2000
+        self.MMT = MMT()
+
+    def isObservable(self, timestamp):
+        """Is the target observable at the given datetime."""
+
+        # Check the airmass. Checking for < 1.0 is for numerical issues
+        airmass_cutoff = 1.8
+        airmass = self.airmass(timestamp)  # Using it twice, only calc once
+        if (airmass < 1.0) or (airmass > airmass_cutoff):
+            return 0
+
+        # Check the rotator limit
+        # TODO Add longslit check for +180 and 0
+        rotator_limits = [-180, 164]
+        rotAngle = self.rotator_angle(timestamp)
+        if rotAngle < rotator_limits[0] or \
+           rotAngle > rotator_limits[1]:
+            return 0
+
+        return 1
+
+    def AltAz(self, timestamp):
+        """Calculate the Alt/Az position of a target.
+
+        Inputs:
+            ra : Right Ascension
+            dec : Declination
+            timestamp : timestamp timestamp
+            observatory : pyEphem.Observer object
+        """
+        self.MMT.MMTEphem.date = timestamp
+        self.ephem.compute(self.MMT.MMTEphem)
+
+        # Return the alt and az calculated
+        return self.ephem.alt * 180.0 / np.pi, \
+            self.ephem.az * 180 / np.pi
+
+    def airmass(self, timestamp):
+        """Given a targets position and time, calculate the airmass."""
+
+        # Calculate the alt az
+        alt, az = self.AltAz(timestamp)
+        zenith_angle = 90.0 - alt
+        za_radians = zenith_angle / 180.0 * np.pi
+        return 1.0 / np.cos(za_radians)
+
+    def parallactic_angle(self, timestamp):
+        """Calculate the parallactic angle at a given observation time."""
+        self.MMT.MMTEphem.date = timestamp
+        self.ephem.compute(self.MMT.MMTEphem)
+        return self.ephem.parallactic_angle()
+
+    def rotator_angle(self, timestamp):
+        """Calculate the rotator angle needed for the PA and time."""
+        parAngle = self.parallactic_angle(timestamp) * 180.0 / np.pi
+
+        rotAngle = parAngle - self.position_angle
+
+        # Account for the fact that 355 and -5 are the same angle
+        if rotAngle < -180:
+            rotAngle += 360.0
+
+        return rotAngle
+
+    def separation(self, Target):
+        """Calculate the distance between this target and another"""
+        # Convert coordinates to radians
+        return AngSep(self.ephem._ra, self.ephem._dec, Target.ra, Target.dec)
+
+    def lunar_distance(self, timestamp):
+        """Calculate the distance to the moon."""
+        moon_ra, moon_dec = self.MMT.moonPosition(timestamp)
+        return AngSep(self.ephem._ra, self.ephem._dec, moon_ra, moon_dec)
+
+
+class MMT:
+    """Define an object to hold details about the MMT."""
+
+    def __init__(self):
+        """Initialize the MMT object."""
+        self.MMTEphem = pyEphem.Observer()
+        self.MMTEphem.pressure = 0
+        self.MMTEphem.lat = "31:41:19.6"
+        self.MMTEphem.lon = "-110:53:04.4"
+        self.MMTEphem.elevation = 2600
+
+        # This holds the definition of twilight
+        self.twilight_horizon = "-12"
+        self.MMTEphem.horizon = self.twilight_horizon
+
+    def moon_age(self, timestamp):
+        """Return the age of the moon at the given time."""
+        d1 = pyEphem.next_new_moon(timestamp).datetime()
+        d2 = pyEphem.previous_new_moon(timestamp).datetime()
+
+        # Check format of provided time. If it wasn't a timestamp, make it one.
+        if isinstance(timestamp, datetime.datetime) is False:
+            timestamp = timestamp.datetime()
+
+        # Find the total time since new moon and then convert to days
+        if (d1 - timestamp) < (timestamp - d2):
+            return (timestamp - d1).total_seconds() / 3600. / 24.
+        else:
+            return (timestamp - d2).total_seconds() / 3600. / 24.
+
+    def moonPosition(self, timestamp):
+        """Return the position of the moon at the given time."""
+        # Construct the lunar ephemeris and find ra an dec given time
+        j = pyEphem.Moon()
+        j.compute(timestamp)
+        return j.ra, j.dec
+
+    def string_timestamp_to_noonMST(self, timestamp):
+        """Convert a string timestamp to reference noon MST"""
+        return timestamp.split()[0] + ' 19:00'
+
+    def evening_twilight(self, timestamp):
+        """Calculate the next evening twilight."""
+        # Check type of timestamp
+        if type(timestamp) == str:
+            timestamp = self.string_timestamp_to_noonMST(timestamp)
+
+        # Set the calculation to the specified date
+        self.MMTEphem.date = timestamp
+        return self.MMTEphem.next_setting(pyEphem.Sun()).datetime()
+
+    def morning_twilight(self, timestamp):
+        """Calculate the next morning twilight."""
+        # Check the type of timestamp
+        if type(timestamp) == str:
+            timestamp = self.string_timestamp_to_noonMST(timestamp)
+
+        # Set the calculation to be done at the specified date
+        self.MMTEphem.date = timestamp
+        return self.MMTEphem.next_rising(pyEphem.Sun()).datetime()
+
+    def is_moon_up(self, timestamp):
+        """Calculate if the moon is up at the given timestamp."""
+
+        # Calculate the last and next moonrise
+        self.MMTEphem.date = timestamp
+        self.MMTEphem.horizon = '-0:34'
+        prev_moonset = self.MMTEphem.previous_setting(pyEphem.Moon())
+        prev_moonrise = self.MMTEphem.previous_rising(pyEphem.Moon())
+        self.MMTEphem.horizon = self.twilight_horizon  # Restore default
+
+        if prev_moonset > prev_moonrise:
+            return 0
+        else:
+            return 1
+
+
+def get_cmap_tuple(ii):
+    """Create colormap."""
+    # rgbt = plt.cm.Pastel1(ii)
+    rgbt = plt.cm.Set3(ii)
+    out_cmap = (int(rgbt[0]*255),
+                int(rgbt[1]*255),
+                int(rgbt[2]*255))
+    return out_cmap
+
+
+def tuple_to_hex(rgb):
+    return '#%02x%02x%02x' % rgb
 
 
 def hms2dec(string):
@@ -212,6 +394,39 @@ def read_all_fld_files(runname):
 
     # Convert the list to a dataframe and output
     return pd.DataFrame(fld_list)
+
+
+def create_done_mask(obspars, runname):
+    """Return the donepar dataframe for this run.
+
+    If this is the first time the queue has been run,
+    we opt to use a blank file
+    otherwise, read the existing donefile.
+    """
+
+    blank_donepar = create_blank_done_mask(obspars, runname)
+    donefile = 'mmirs_catalogs/' + runname + '/donefile.json'
+    if os.path.isfile(donefile):
+        print("Found Existing Set of Finished Observations:")
+        prev_donepar = pd.read_json(donefile, orient='records')
+
+        # Loop through the blank file and fill it with values form the donefile
+        for ii in range(len(blank_donepar)):
+            obj = blank_donepar.loc[ii, 'objid']
+            if obj in prev_donepar['objid'].values:
+                this_item = prev_donepar[prev_donepar['objid'] == obj]
+                blank_donepar.loc[ii, 'complete'] = \
+                    this_item.iloc[0]['complete']
+                blank_donepar.loc[ii, 'time_for_PI'] = \
+                    this_item.iloc[0]['time_for_PI']
+                blank_donepar.loc[ii, 'done_visits'] = \
+                    this_item.iloc[0]['done_visits']
+    else:
+        print("No existing donefile.csv for run %s, initializing..." % runname)
+        # Write this for future iterations
+        blank_donepar.to_json(donefile, orient='records')
+
+    return blank_donepar
 
 
 def create_blank_done_mask(obspars, runname):
@@ -567,6 +782,7 @@ def obsOneNight(obspar, donepar, date, runname):
         else:
             # Append new entry to schedule
             schedule.append(new_sched)
+
             current_time += \
                 datetime.timedelta(seconds=new_sched['duration'])
             if min(donepar['complete']) == 1:
@@ -584,39 +800,6 @@ def obsAllNights(obspar, donepar, all_dates, iter_number, runname):
         for line in schedule:
             full_schedule.append(line)
     return pd.DataFrame(full_schedule)
-
-
-def read_donefile(donepar, runname):
-    """Reads in the mmirs_catalogs/runname/donelist.dat file.
-
-    Updates the donepar to include these previously observed fields.
-    """
-
-    donefile = 'mmirs_catalogs/' + runname + '/donelist.dat'
-    if os.path.isfile(donefile):
-        f = open(donefile)
-        for line in f.readlines():
-            if line[0] != '#' and line.strip() != '':
-                sline = line.strip().split()
-                id = sline[0]
-                pi = sline[1]
-                visits = float(sline[2])
-                donetime = float(sline[3])
-                completed = float(sline[4])
-
-                if max(donepar['objid'] == id) is False:
-                    raise Exception("No match found for %s" % id)
-                if donepar.loc[donepar['objid'] == id,
-                               'done_visits'].max() > 0:
-                    raise Exception("Field %s is listed multiple times in" +
-                                    " donefile" % id)
-
-                donepar.loc[donepar['objid'] == id, 'done_visits'] = visits
-                donepar.loc[donepar['PI'] == pi, 'time_for_PI'] += donetime
-                donepar.loc[donepar['objid'] == id, 'complete'] = completed
-
-        f.close()
-    return donepar
 
 
 def read_fitdates():
@@ -645,23 +828,48 @@ def schedule_to_json(schedule, obspars, outfile='schedule.json'):
     http://fullcalendar.io/docs/event_data/Event_Object/
     """
     json_schedule_list = []
+
+    # Get a color Table
+    color = [tuple_to_hex(get_cmap_tuple(x/len(obspars)))
+             for x in range(len(obspars))]
+    obspars['color'] = color
+
     for ii in range(len(schedule)):
         entry = schedule.loc[ii, :]
 
+        obs = obspars[obspars['objid'] == entry['objid']]
+
         # Create a blank dictionary to hold the output
         json_template = {}
-        json_template['title'] = entry['objid']
+        json_template['objid'] = entry['objid']
         # Times need to be in YYYY-MM-DDTHH:MM:SS
 
+        json_template['backgroundColor'] = obs.iloc[0]['color']
+        json_template['borderColor'] = obs.iloc[0]['color']
         json_template['start'] = \
             str(entry['start_time']).replace(' ', 'T')[0:19]
         json_template['end'] = \
             str(entry['end_time']).replace(' ', 'T')[0:19]
         json_template['url'] = 'fields/' + entry['objid']
+
+        # Append the keys needed for the tooltip
+        copy_columns = ['PI', 'dec', 'dithersize', 'exptime',
+                        'filter', 'gain', 'grism',
+                        'mag', 'mask', 'moon', 'obstype',
+                        'pa', 'photometric', 'ra', 'readtab',
+                        'seeing', 'repeats']
+        json_template['n_visits_scheduled'] = entry['n_visits_scheduled']
+        for col in copy_columns:
+            json_template[col] = obs[col]
+
+        # Parse the field title
+        reString = "^[a-zA-Z]+-[A-Za-z0-9]+_(.*)$"
+        m = re.search(reString, entry['objid'])
+
+        json_template['title'] = m.group(1)
         json_schedule_list.append(json_template)
 
     outframe = pd.DataFrame.from_dict(json_schedule_list)
-
     outframe.to_json(outfile, orient='records')
 
 
@@ -676,7 +884,7 @@ def main(args):
     obspars = read_all_fld_files(runname)
 
     # Create a blank donepar
-    orig_donepar = create_blank_done_mask(obspars, runname)
+    orig_donepar = create_done_mask(obspars, runname)
     donepar = orig_donepar.copy()   # This is the working copy
 
     # Read in the dates to be fit
@@ -684,7 +892,7 @@ def main(args):
 
     # Iterate
     finished_flag = False
-    number_of_iterations = 1
+    number_of_iterations = 5
     iter_number = 0
     while (iter_number < number_of_iterations) and finished_flag is False:
         schedule = obsAllNights(obspars, donepar, all_dates,
@@ -720,177 +928,11 @@ def main(args):
 
     # Write out the schedule
     outfile = 'schedule.csv'
-    schedule.to_csv(outfile)
+    schedule.to_csv(outfile, index_label='index')
 
     # Now, parse the schedule to JSON for plotting
     jsonfile = 'schedule.json'
     schedule_to_json(schedule, obspars, outfile=jsonfile)
-
-
-class Target:
-
-    """Define the Target class."""
-
-    def __init__(self, ra, dec, position_angle):
-        """Intialize the target object."""
-
-        self.ra = ra
-        self.dec = dec
-        self.position_angle = float(position_angle)
-        self.ephem = pyEphem.FixedBody()
-        self.ephem._ra = self.ra
-        self.ephem._dec = self.dec
-        self.ephem._epoch = pyEphem.J2000
-        self.MMT = MMT()
-
-    def isObservable(self, timestamp):
-        """Is the target observable at the given datetime."""
-
-        # Check the airmass. Checking for < 1.0 is for numerical issues
-        airmass_cutoff = 1.8
-        airmass = self.airmass(timestamp)  # Using it twice, only calc once
-        if (airmass < 1.0) or (airmass > airmass_cutoff):
-            return 0
-
-        # Check the rotator limit
-        # TODO Add longslit check for +180 and 0
-        rotator_limits = [-180, 164]
-        rotAngle = self.rotator_angle(timestamp)
-        if rotAngle < rotator_limits[0] or \
-           rotAngle > rotator_limits[1]:
-            return 0
-
-        return 1
-
-    def AltAz(self, timestamp):
-        """Calculate the Alt/Az position of a target.
-
-        Inputs:
-            ra : Right Ascension
-            dec : Declination
-            timestamp : timestamp timestamp
-            observatory : pyEphem.Observer object
-        """
-        self.MMT.MMTEphem.date = timestamp
-        self.ephem.compute(self.MMT.MMTEphem)
-
-        # Return the alt and az calculated
-        return self.ephem.alt * 180.0 / np.pi, \
-            self.ephem.az * 180 / np.pi
-
-    def airmass(self, timestamp):
-        """Given a targets position and time, calculate the airmass."""
-
-        # Calculate the alt az
-        alt, az = self.AltAz(timestamp)
-        zenith_angle = 90.0 - alt
-        za_radians = zenith_angle / 180.0 * np.pi
-        return 1.0 / np.cos(za_radians)
-
-    def parallactic_angle(self, timestamp):
-        """Calculate the parallactic angle at a given observation time."""
-        self.MMT.MMTEphem.date = timestamp
-        self.ephem.compute(self.MMT.MMTEphem)
-        return self.ephem.parallactic_angle()
-
-    def rotator_angle(self, timestamp):
-        """Calculate the rotator angle needed for the PA and time."""
-        parAngle = self.parallactic_angle(timestamp) * 180.0 / np.pi
-
-        rotAngle = parAngle - self.position_angle
-
-        # Account for the fact that 355 and -5 are the same angle
-        if rotAngle < -180:
-            rotAngle += 360.0
-
-        return rotAngle
-
-    def separation(self, Target):
-        """Calculate the distance between this target and another"""
-        # Convert coordinates to radians
-        return AngSep(self.ephem._ra, self.ephem._dec, Target.ra, Target.dec)
-
-    def lunar_distance(self, timestamp):
-        """Calculate the distance to the moon."""
-        moon_ra, moon_dec = self.MMT.moonPosition(timestamp)
-        return AngSep(self.ephem._ra, self.ephem._dec, moon_ra, moon_dec)
-
-
-class MMT:
-    """Define an object to hold details about the MMT."""
-
-    def __init__(self):
-        """Initialize the MMT object."""
-        self.MMTEphem = pyEphem.Observer()
-        self.MMTEphem.pressure = 0
-        self.MMTEphem.lat = "31:41:19.6"
-        self.MMTEphem.lon = "-110:53:04.4"
-        self.MMTEphem.elevation = 2600
-
-        # This holds the definition of twilight
-        self.twilight_horizon = "-12"
-        self.MMTEphem.horizon = self.twilight_horizon
-
-    def moon_age(self, timestamp):
-        """Return the age of the moon at the given time."""
-        d1 = pyEphem.next_new_moon(timestamp).datetime()
-        d2 = pyEphem.previous_new_moon(timestamp).datetime()
-
-        # Check format of provided time. If it wasn't a timestamp, make it one.
-        if isinstance(timestamp, datetime.datetime) is False:
-            timestamp = timestamp.datetime()
-
-        # Find the total time since new moon and then convert to days
-        if (d1 - timestamp) < (timestamp - d2):
-            return (timestamp - d1).total_seconds() / 3600. / 24.
-        else:
-            return (timestamp - d2).total_seconds() / 3600. / 24.
-
-    def moonPosition(self, timestamp):
-        """Return the position of the moon at the given time."""
-        # Construct the lunar ephemeris and find ra an dec given time
-        j = pyEphem.Moon()
-        j.compute(timestamp)
-        return j.ra, j.dec
-
-    def string_timestamp_to_noonMST(self, timestamp):
-        """Convert a string timestamp to reference noon MST"""
-        return timestamp.split()[0] + ' 19:00'
-
-    def evening_twilight(self, timestamp):
-        """Calculate the next evening twilight."""
-        # Check type of timestamp
-        if type(timestamp) == str:
-            timestamp = self.string_timestamp_to_noonMST(timestamp)
-
-        # Set the calculation to the specified date
-        self.MMTEphem.date = timestamp
-        return self.MMTEphem.next_setting(pyEphem.Sun()).datetime()
-
-    def morning_twilight(self, timestamp):
-        """Calculate the next morning twilight."""
-        # Check the type of timestamp
-        if type(timestamp) == str:
-            timestamp = self.string_timestamp_to_noonMST(timestamp)
-
-        # Set the calculation to be done at the specified date
-        self.MMTEphem.date = timestamp
-        return self.MMTEphem.next_rising(pyEphem.Sun()).datetime()
-
-    def is_moon_up(self, timestamp):
-        """Calculate if the moon is up at the given timestamp."""
-
-        # Calculate the last and next moonrise
-        self.MMTEphem.date = timestamp
-        self.MMTEphem.horizon = '-0:34'
-        prev_moonset = self.MMTEphem.previous_setting(pyEphem.Moon())
-        prev_moonrise = self.MMTEphem.previous_rising(pyEphem.Moon())
-        self.MMTEphem.horizon = self.twilight_horizon  # Restore default
-
-        if prev_moonset > prev_moonrise:
-            return 0
-        else:
-            return 1
 
 
 if __name__ == "__main__":
