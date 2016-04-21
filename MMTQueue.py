@@ -279,7 +279,7 @@ def parse_mask_position_angle(mask, runname):
     angle to add to the fldPar.
     """
     # Read the mask file
-    maskfile = 'mmirs_catalogs/' + runname + '/' + mask + '.msk'
+    maskfile = 'catalogs/' + runname + '/' + mask + '.msk'
     f = open(maskfile, 'r')
 
     # Check each line in the maskfile and find the line that starts with 'pa'
@@ -378,7 +378,7 @@ def read_all_fld_files(runname):
     """Read all of the fld files for a run and output a dataframe."""
 
     # Set the path
-    path = 'mmirs_catalogs/' + runname
+    path = 'catalogs/' + runname 
 
     # Get the list of files that end in .fld in the specified path
     filelist = []
