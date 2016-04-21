@@ -100,7 +100,8 @@ class Target:
     def separation(self, Target):
         """Calculate the distance between this target and another"""
         # Convert coordinates to radians
-        return AngSep(self.ephem._ra, self.ephem._dec, Target.ra, Target.dec)
+        return AngSep(self.ephem._ra, self.ephem._dec,
+                      Target.ephem._ra, Target.ephem._dec)
 
     def lunar_distance(self, timestamp):
         """Calculate the distance to the moon."""
@@ -279,7 +280,7 @@ def parse_mask_position_angle(mask, runname):
     angle to add to the fldPar.
     """
     # Read the mask file
-    maskfile = 'catalogs/' + runname + '/' + mask + '.msk'
+    maskfile = 'catalogs/' + runname + '/masks/' + mask + '.msk'
     f = open(maskfile, 'r')
 
     # Check each line in the maskfile and find the line that starts with 'pa'
@@ -378,7 +379,7 @@ def read_all_fld_files(runname):
     """Read all of the fld files for a run and output a dataframe."""
 
     # Set the path
-    path = 'catalogs/' + runname 
+    path = 'catalogs/' + runname
 
     # Get the list of files that end in .fld in the specified path
     filelist = []
@@ -592,7 +593,7 @@ def calc_same_target_flag(fldpar, prev_target):
      This upweights the chances of observing a field we're already looking at
      rather than paying the overhead fee multiple times.
      """
-    dist = fldpar.separation(prev_target)
+    dist = fldpar.iloc[0]['ephem'].separation(prev_target)
     dist_weight = 1000.0  # Increase chances of observing nearby target
     if dist < 10./3600.:
         return dist_weight
@@ -617,7 +618,7 @@ def calc_single_weight(fldpar, obj_donepar, start_time,
 
     # Check to see if the previous target we looked at was in this field
     if prev_target is not None:
-        dist_weight = calc_same_target_flag(prev_target)
+        dist_weight = calc_same_target_flag(fldpar, prev_target)
     else:
         dist_weight = 1.0
 
@@ -774,6 +775,7 @@ def obsOneNight(obspar, donepar, date, runname):
                 datetime.timedelta(seconds=new_sched['duration'])
             if min(donepar['complete']) == 1:
                 all_done = True
+            prev_target = new_target
     return schedule
 
 
