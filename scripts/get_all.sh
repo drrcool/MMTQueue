@@ -9,5 +9,8 @@ if test "$#" -ne 1; then
 fi
 TRIMESTER=$1
 
-sh get_mmirs_catalogs.sh $TRIMESTER
-sh get_mmirs_masks.sh $TRIMESTER
+MMTQUEUE_PATH=${MMTQUEUE_PATH:="$HOME/MMTQueue/"}
+
+
+sh $MMTQUEUE_PATH/scripts/get_mmirs_catalogs.sh $TRIMESTER
+sh $MMTQUEUE_PATH/scripts/get_mmirs_masks.sh $TRIMESTER
