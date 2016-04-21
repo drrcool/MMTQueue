@@ -1,6 +1,10 @@
 .fc-title {
     font-size: 14px
 }
+.fc-time-grid-event {
+    font-size: 12px;
+    font-weight: bold;
+}
 .sched_param {
     font-weight: bold;
 }

@@ -405,26 +405,13 @@ def create_done_mask(obspars, runname):
     """
 
     blank_donepar = create_blank_done_mask(obspars, runname)
-    donefile = 'mmirs_catalogs/' + runname + '/donefile.json'
+    donefile = 'mmirs_catalogs/' + runname + '/donefile.dat'
     if os.path.isfile(donefile):
         print("Found Existing Set of Finished Observations:")
-        prev_donepar = pd.read_json(donefile, orient='records')
-
-        # Loop through the blank file and fill it with values form the donefile
-        for ii in range(len(blank_donepar)):
-            obj = blank_donepar.loc[ii, 'objid']
-            if obj in prev_donepar['objid'].values:
-                this_item = prev_donepar[prev_donepar['objid'] == obj]
-                blank_donepar.loc[ii, 'complete'] = \
-                    this_item.iloc[0]['complete']
-                blank_donepar.loc[ii, 'time_for_PI'] = \
-                    this_item.iloc[0]['time_for_PI']
-                blank_donepar.loc[ii, 'done_visits'] = \
-                    this_item.iloc[0]['done_visits']
+        print("THIS IS NOT IMPLEMENTED, STOP NOW!!!!!")
     else:
         print("No existing donefile.csv for run %s, initializing..." % runname)
         # Write this for future iterations
-        blank_donepar.to_json(donefile, orient='records')
 
     return blank_donepar
 
@@ -860,7 +847,7 @@ def schedule_to_json(schedule, obspars, outfile='schedule.json'):
                         'seeing', 'repeats']
         json_template['n_visits_scheduled'] = entry['n_visits_scheduled']
         for col in copy_columns:
-            json_template[col] = obs[col]
+            json_template[col] = obs.iloc[0][col]
 
         # Parse the field title
         reString = "^[a-zA-Z]+-[A-Za-z0-9]+_(.*)$"
