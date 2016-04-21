@@ -795,7 +795,7 @@ def obsAllNights(obspar, donepar, all_dates, iter_number, runname):
     full_schedule = []
     for date in all_dates:
         sys.stdout.write("\r Working on Date %s of iteration %d" %
-                         (date, iter_number))
+                         (date, iter_number+1))
         schedule = obsOneNight(obspar, donepar, date, runname)
         for line in schedule:
             full_schedule.append(line)
