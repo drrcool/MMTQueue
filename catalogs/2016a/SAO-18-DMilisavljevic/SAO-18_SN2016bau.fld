@@ -1,5 +1,0 @@
-pi	DMilisavljevic
-program	SAO-18
-objid	ra	dec	pmra	pmdec	pa	moon	exptime	nexp	repeats	oneper	priority	grism	filter	epoch	dithersize	seeing	photometric	readtab	gain	obstype	mag	mask
------	--	---	----	-----	--	----	-------	----	-------	------	--------	-----	------	-----	----------	------	-----------	-------	----	-------	---	----
-SAO-18_SN2016bau	11:20:59.02	+53:10:25.6	0.000	0.00	0	bright	2.0000 	2	0	0	1	J	zJ	J2000.0	5	3.0	N	ramp_4.426	0.95	longslit	16	2pixel-long

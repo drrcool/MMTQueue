@@ -1,5 +1,0 @@
-pi	GZhou
-program	SAO-4
-objid	ra	dec	pmra	pmdec	pa	moon	exptime	nexp	repeats	oneper	priority	grism	filter	epoch	dithersize	seeing	photometric	readtab	gain	obstype	mag	mask
------	--	---	----	-----	--	----	-------	----	-------	------	--------	-----	------	-----	----------	------	-----------	-------	----	-------	---	----
-SAO-4_W103.a1	16:37:15.5680	7:11:00.000	0.0	0.0	    3.000	bright	840.0000 	1680	1	1	1	HK	HK3	J2000.0	0.0	3.0	N	ramp_1.475	0.95	mask	00.86	W103.a1

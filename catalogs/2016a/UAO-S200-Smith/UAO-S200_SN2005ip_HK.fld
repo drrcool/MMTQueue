@@ -1,5 +1,0 @@
-pi	Smith
-program	UAO-S200
-objid	ra	dec	pmra	pmdec	pa	moon	exptime	nexp	repeats	oneper	priority	grism	filter	epoch	dithersize	seeing	photometric	readtab	gain	obstype	mag	mask
------	--	---	----	-----	--	----	-------	----	-------	------	--------	-----	------	-----	----------	------	-----------	-------	----	-------	---	----
-UAO-S200_SN2005ip_HK	09:32:06.42	+08:26:44.4	0.000	0.00	0	dark	10.0000 	3	0	0	1	HK	HK3	J2000.0	20	.8	Y	ramp_1.475	0.95	longslit	21	5pixel-long
