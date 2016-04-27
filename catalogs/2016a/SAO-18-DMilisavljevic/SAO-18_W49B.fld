@@ -1,0 +1,5 @@
+pi	DMilisavljevic
+program	SAO-18
+objid	ra	dec	pmra	pmdec	pa	moon	exptime	nexp	repeats	oneper	priority	grism	filter	epoch	dithersize	seeing	photometric	readtab	gain	obstype	mag	mask
+-----	--	---	----	-----	--	----	-------	----	-------	------	--------	-----	------	-----	----------	------	-----------	-------	----	-------	---	----
+SAO-18_W49B	19:11:08.20	+09:06:33.9	0.000	0.00	0	bright	0.5000 	4	0	0	1	Open	H	J2000.0	600	2	N	ramp_4.426	0.95	imaging	18	imaging

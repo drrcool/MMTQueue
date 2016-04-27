@@ -160,6 +160,30 @@ class MMT:
         self.MMTEphem.date = timestamp
         return self.MMTEphem.next_setting(pyEphem.Sun()).datetime()
 
+    def sunrise(self, timestamp):
+        """Calculate sunrise."""
+        if type(timestamp) == str:
+            timestamp = self.string_timestamp_to_noonMST(timestamp)
+
+        horizon_holder = self.MMTEphem.horizon
+        self.MMTEphem.horizon = "0"
+        self.MMTEphem.date = timestamp
+        sunrise = self.MMTEphem.next_rising(pyEphem.Sun()).datetime()
+        self.MMTEphem.horizon = horizon_holder
+        return sunrise
+
+    def sunset(self, timestamp):
+        """Calculate sunset."""
+        if type(timestamp) == str:
+            timestamp = self.string_timestamp_to_noonMST(timestamp)
+
+        horizon_holder = self.MMTEphem.horizon
+        self.MMTEphem.horizon = "0"
+        self.MMTEphem.date = timestamp
+        sunrise = self.MMTEphem.next_setting(pyEphem.Sun()).datetime()
+        self.MMTEphem.horizon = horizon_holder
+        return sunrise
+
     def morning_twilight(self, timestamp):
         """Calculate the next morning twilight."""
         # Check the type of timestamp
@@ -862,7 +886,7 @@ def schedule_to_json(schedule, obspars, outfile='schedule.json'):
     outframe.to_json(outfile, orient='records')
 
 
-def main(args):
+def fit_queue_schedule(args):
     """Main processing function."""
     if len(args) < 2:
         raise Exception("Must specify a run name")
@@ -925,4 +949,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    if sys.argv[1] == 'observability':
+        observability_plot(sys.argv)
+    else:
+        fit_queue_schedule(sys.argv)
