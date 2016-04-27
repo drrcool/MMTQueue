@@ -6,6 +6,7 @@
 # Check to ensure that the trimester name was passed.
 if test "$#" -ne 1; then
     echo "You must provide a trimester name"
+    exit 1
 fi
 TRIMESTER=$1
 TRIMESTER_UPPERCASE=`echo $TRIMESTER | awk '{print toupper($0)}'`
