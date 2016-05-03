@@ -462,11 +462,13 @@ def create_done_mask(obspars, runname):
                 match = (blank_donepar['objid'] == field)
                 blank_donepar.loc[match, 'done_visits'] += done_visits[field]
                 requested_visits = \
-                    float(obspars[obspars['objid'] == field]['repeats'][0])
+                    float(obspars[obspars['objid'] == field]
+                          ['repeats'].values[0])
                 if done_visits[field] >= requested_visits:
-                    blank_donepar.iloc[match, 'completed'] = 1
+                    blank_donepar.loc[match, 'completed'] = 1
                 PI_match = \
-                    (blank_donepar['PI'] == blank_donepar[match]['PI'][0])
+                    (blank_donepar['PI'] ==
+                     blank_donepar[match]['PI'].values[0])
                 blank_donepar.loc[PI_match, 'time_for_PI'] += \
                     done_targettime[field]
     else:
