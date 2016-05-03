@@ -231,40 +231,6 @@ def verify_nondark(fldpar, error_log):
     return error_count
 
 
-def verify_dithersize(fldpar, error_log):
-    """Check that the dithersizes are standard."""
-    error_count = 0
-    for ii in range(len(fldpar)):
-        PI = fldpar.iloc[ii]['PI']
-        field = fldpar.iloc[ii]['objid']
-        obstype = fldpar.iloc[ii]['obstype']
-        dithersize = float(fldpar.iloc[ii]['dithersize'])
-
-        if obstype == 'longslit':
-            if dithersize not in [120, 14, 20, 30, 50, 60, 70, 15, 5]:
-                error_count += 1
-                error_string = \
-                    ("* Has dithersize of {1} set.  This is not "
-                     "one of the standard longslit dither \n"
-                     "lengths. You will "
-                     "either need to provide your own dither catalog or \n"
-                     "use one of the standard dithers.".format(field,
-                                                               dithersize))
-                error_log = add_error(error_log, error_string, PI, field)
-        if obstype == 'mask':
-            if dithersize not in [1.8]:
-                error_count += 1
-                error_string = \
-                    ("* Has a dithersize of {1} set. For masks "
-                     "the standard dither pattern \n"
-                     "is 1.8 arcseconds with "
-                     "4 positions.  Please verify that this alternate \n"
-                     "pattern is what you want.".format(field, dithersize))
-                error_log = add_error(error_log, error_string, PI, field)
-
-    return error_count
-
-
 def count_errors_for_pi(error_log, pi):
     """Count the number of errors listed for a single PI."""
     error_count = 0
@@ -350,9 +316,6 @@ def main(args):
     error_count += \
         verify_nondark(fldpar, error_log)
 
-    # Check if the dithersize is the correct values
-    error_count += \
-        verify_dithersize(fldpar, error_log)
 
     create_email_templates(error_log, outroot)
 
