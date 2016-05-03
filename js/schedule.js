@@ -46,6 +46,7 @@ $('#calendar').fullCalendar({
         $('#modal_totalexptime').html(event.n_visits_scheduled*event.repeats*event.exptime*60);
         $('#modal_photometric').html(event.photometric);
         $('#modal_seeing').html(event.seeing);
+        $('#modal_positionangle').html(event.pa);
         console.log(event);
         $('#fullCalModal').modal();
         return false;
