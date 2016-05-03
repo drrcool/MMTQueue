@@ -940,7 +940,6 @@ def fit_queue_schedule(args):
     # Create a blank donepar
     orig_donepar = create_done_mask(obspars, runname)
     donepar = orig_donepar.copy()   # This is the working copy
-    ipdb.set_trace()  ######### Break Point ###########
 
     # Read in the dates to be fit
     all_dates = read_fitdates()
