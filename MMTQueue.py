@@ -35,7 +35,7 @@ class Target:
         self.ephem._epoch = pyEphem.J2000
         self.MMT = MMT()
 
-    def isObservable(self, timestamp):
+    def isObservable(self, timestamp, start_time):
         """Is the target observable at the given datetime."""
 
         # Check the airmass. Checking for < 1.0 is for numerical issues
@@ -48,6 +48,12 @@ class Target:
         # TODO Add longslit check for +180 and 0
         rotator_limits = [-180, 164]
         rotAngle = self.rotator_angle(timestamp)
+        start_rotAngle = self.rotator_angle(start_time)
+        # Account for the fact that 355 and -5 are the same angle
+        # We only do this if we also would have done it at the start_time.
+        if start_rotAngle < -180:
+            rotAngle += 360.0
+
         if rotAngle < rotator_limits[0] or \
            rotAngle > rotator_limits[1]:
             return 0
@@ -91,9 +97,6 @@ class Target:
 
         rotAngle = parAngle - self.position_angle
 
-        # Account for the fact that 355 and -5 are the same angle
-        if rotAngle < -180:
-            rotAngle += 360.0
 
         return rotAngle
 
@@ -430,13 +433,49 @@ def create_done_mask(obspars, runname):
     """
 
     blank_donepar = create_blank_done_mask(obspars, runname)
-    donefile = 'mmirs_catalogs/' + runname + '/donefile.dat'
+    donefile = 'catalogs/' + runname + '/donefile.dat'
     if os.path.isfile(donefile):
         print("Found Existing Set of Finished Observations:")
-        print("THIS IS NOT IMPLEMENTED, STOP NOW!!!!!")
+        f = open(donefile, 'r')
+        done_visits = {}
+        done_targettime = {}
+        for line in f.readlines():
+            # Only parse the line if it's uncommented
+            if line[0] != '#':
+                field, visits, elapsed_time = line.strip().split()
+                if field not in done_visits:
+                    done_visits[field] = float(visits)
+                    done_targettime[field] = float(elapsed_time)
+                else:
+                    done_visits[field] += float(visits)
+                    done_targettime[field] += float(elapsed_time)
+                if field not in obspars['objid'].values:
+                    print('{0} is a field in the donefile, '
+                          'but not in FLD files.'.format(field))
+                    print('This is a sign of a catastrophic bug. Breaking.')
+                    sys.exit(0)
+        f.close()
+
+        # Now Append the blank donepar with these previous values
+        if len(done_visits) > 0:
+            for field in done_visits.keys():
+                match = (blank_donepar['objid'] == field)
+                blank_donepar.loc[match, 'done_visits'] += done_visits[field]
+                requested_visits = \
+                    float(obspars[obspars['objid'] == field]['repeats'][0])
+                if done_visits[field] >= requested_visits:
+                    blank_donepar.iloc[match, 'completed'] = 1
+                PI_match = \
+                    (blank_donepar['PI'] == blank_donepar[match]['PI'][0])
+                blank_donepar.loc[PI_match, 'time_for_PI'] += \
+                    done_targettime[field]
     else:
         print("No existing donefile.csv for run %s, initializing..." % runname)
         # Write this for future iterations
+        f = open(donefile, 'w')
+        f.write('# Donefile for run {0}\n'.format(runname))
+        f.write('# Field_name completed_visits elapsed_time(hour)\n')
+        f.close()
 
     return blank_donepar
 
@@ -557,7 +596,7 @@ def does_field_fit(fldpar, start_time, donepar):
 
     # This only works if fldpar has one entry
     if len(fldpar) > 1:
-        raise AssertionError("There are more tahn 1 fields with name %s" %
+        raise AssertionError("There are more than 1 fields with name %s" %
                              fldpar['objid'])
 
     # First, get the end of the night time
@@ -566,7 +605,7 @@ def does_field_fit(fldpar, start_time, donepar):
     time_remaining = (night_end - start_time).total_seconds()  # seconds
 
     # Is the target observable at the start_time?
-    if fldpar.iloc[0]['ephem'].isObservable(start_time) == 0:
+    if fldpar.iloc[0]['ephem'].isObservable(start_time, start_time) == 0:
         return 0.0, start_time, 0
 
     # Get the exposure parameters for this object
@@ -590,7 +629,8 @@ def does_field_fit(fldpar, start_time, donepar):
                                            n_repeats, fldpar)
 
         # Is the target still observable at the end_time?
-        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration) == 1:
+        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration,
+                                                start_time) == 1:
             return 1.0, start_time + duration, n_repeats
         else:
             possible_visits = n_repeats - 1
@@ -602,7 +642,8 @@ def does_field_fit(fldpar, start_time, donepar):
     while nrepeats_observable >= 1:
         duration = calculate_observation_duration(exptime_per_visit,
                                                   nrepeats_observable, fldpar)
-        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration) == 1:
+        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration,
+                                                start_time) == 1:
             return 1.0, start_time + duration, nrepeats_observable
         else:
             nrepeats_observable -= 1  # Decrement and try again
@@ -899,6 +940,7 @@ def fit_queue_schedule(args):
     # Create a blank donepar
     orig_donepar = create_done_mask(obspars, runname)
     donepar = orig_donepar.copy()   # This is the working copy
+    ipdb.set_trace()  ######### Break Point ###########
 
     # Read in the dates to be fit
     all_dates = read_fitdates()

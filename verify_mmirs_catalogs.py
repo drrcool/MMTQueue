@@ -225,7 +225,7 @@ def verify_nondark(fldpar, error_log):
                 ("* Specified to have a {1} lunar phase or "
                  "darker.  Please verify if \n"
                  "this is a requirement as it "
-                 "will dramatically limit the flexibility of the MMIRS \n"
+                 "will dramatically limit the \n flexibility of the MMIRS "
                  "queue observations.".format(field, moon))
             error_log = add_error(error_log, error_string, PI, field)
     return error_count
