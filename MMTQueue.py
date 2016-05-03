@@ -35,7 +35,7 @@ class Target:
         self.ephem._epoch = pyEphem.J2000
         self.MMT = MMT()
 
-    def isObservable(self, timestamp, start_time):
+    def isObservable(self, timestamp):
         """Is the target observable at the given datetime."""
 
         # Check the airmass. Checking for < 1.0 is for numerical issues
@@ -48,10 +48,9 @@ class Target:
         # TODO Add longslit check for +180 and 0
         rotator_limits = [-180, 164]
         rotAngle = self.rotator_angle(timestamp)
-        start_rotAngle = self.rotator_angle(start_time)
         # Account for the fact that 355 and -5 are the same angle
         # We only do this if we also would have done it at the start_time.
-        if start_rotAngle < -180:
+        if rotAngle < -180:
             rotAngle += 360.0
 
         if rotAngle < rotator_limits[0] or \
@@ -96,8 +95,6 @@ class Target:
         parAngle = self.parallactic_angle(timestamp) * 180.0 / np.pi
 
         rotAngle = parAngle - self.position_angle
-
-
         return rotAngle
 
     def separation(self, Target):
@@ -607,7 +604,7 @@ def does_field_fit(fldpar, start_time, donepar):
     time_remaining = (night_end - start_time).total_seconds()  # seconds
 
     # Is the target observable at the start_time?
-    if fldpar.iloc[0]['ephem'].isObservable(start_time, start_time) == 0:
+    if fldpar.iloc[0]['ephem'].isObservable(start_time) == 0:
         return 0.0, start_time, 0
 
     # Get the exposure parameters for this object
@@ -631,8 +628,7 @@ def does_field_fit(fldpar, start_time, donepar):
                                            n_repeats, fldpar)
 
         # Is the target still observable at the end_time?
-        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration,
-                                                start_time) == 1:
+        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration) == 1:
             return 1.0, start_time + duration, n_repeats
         else:
             possible_visits = n_repeats - 1
@@ -644,8 +640,7 @@ def does_field_fit(fldpar, start_time, donepar):
     while nrepeats_observable >= 1:
         duration = calculate_observation_duration(exptime_per_visit,
                                                   nrepeats_observable, fldpar)
-        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration,
-                                                start_time) == 1:
+        if fldpar.iloc[0]['ephem'].isObservable(start_time+duration) == 1:
             return 1.0, start_time + duration, nrepeats_observable
         else:
             nrepeats_observable -= 1  # Decrement and try again
