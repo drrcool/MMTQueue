@@ -27,7 +27,7 @@ $('#calendar').fullCalendar({
     },
 
     eventClick: function(event, jsEvent, view) {
-        $('#modalTitle').html(event.title);
+        $('#modalTitle').html(event.objid);
         $('#modal_ra').html(event.ra);
         $('#modal_obstype').html(event.obstype);
         $('#modal_pi').html(event.PI);
